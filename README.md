@@ -5,8 +5,8 @@ Instagram投稿の準備作業(画像加工・キャプション作成・スケ�
 
 - **自動投稿は行いません。** 最終的な投稿はInstagramアプリから手動で行う前提で、
   「投稿に必要な画像とキャプション文をワンステップで用意し、投稿前チェックを通す」ところまでを自動化します。
-- AIによるキャプション(文面・ハッシュタグ)自動生成、画像の自動補正・背景除去・透かし合成、
-  下書き管理・承認チェックリスト・投稿カレンダーをまとめて扱えます。
+- キャプション(文面・ハッシュタグ)は画像を確認しながらの手入力方式です(外部APIキー不要)。
+  画像の自動補正・背景除去・透かし合成、下書き管理・承認チェックリスト・投稿カレンダーをまとめて扱えます。
 
 ## できること
 
@@ -14,7 +14,7 @@ Instagram投稿の準備作業(画像加工・キャプション作成・スケ�
 |---|---|---|
 | 下書き作成 | `igtool new` | トピック・キーワード・画像から投稿ドラフトを作成 |
 | 一覧・詳細確認 | `igtool list` / `igtool show` | 下書きの状態を確認 |
-| AIキャプション生成 | `igtool caption` | 画像を見た上でキャプション文・ハッシュタグを自動生成 |
+| キャプション入力 | `igtool caption` | 画像を確認しながらキャプション文・ハッシュタグを手入力 |
 | 画像編集 | `igtool edit` | Instagram向けリサイズ・自動補正・背景除去・透かし・テキスト合成 |
 | 投稿前チェック | `igtool review` | NGワード・画像サイズ・権利関係などのチェックリストを対話形式で実施 |
 | 承認 | `igtool approve` | チェック済みの投稿を承認状態にする |
@@ -31,7 +31,7 @@ source .venv/bin/activate
 pip install -e .
 
 cp .env.example .env
-# .env を編集して ANTHROPIC_API_KEY を設定(AIキャプション生成に必要)
+# 必要に応じてデータ保存先などを .env で変更(未編集でも動作します)
 ```
 
 背景除去(`igtool edit --bg-remove`)を使う場合は追加でインストールします(初回はモデルダウンロードが走るため少し時間がかかります)。
@@ -51,8 +51,10 @@ igtool new --topic "秋の新作紅茶" --keyword 紅茶 --keyword 秋限定 --t
 igtool edit <post_id> --preset square --enhance
 igtool edit <post_id> --watermark ./assets/logo.png --watermark-position bottom-right
 
-# 3. AIでキャプション・ハッシュタグを生成(画像の内容を見て作成)
-igtool caption <post_id> --notes "季節限定であることを強調して"
+# 3. キャプション・ハッシュタグを入力(画像のパス・サイズを見ながら対話入力)
+igtool caption <post_id>
+# コマンド一発で決め打ちしたい場合は直接指定もできる
+igtool caption <post_id> --caption-text "秋限定の新作紅茶が入荷しました。" --hashtags "紅茶,秋限定"
 
 # 4. 内容を確認して手直ししたい場合は meta.yaml を直接編集してもOK
 igtool show <post_id>

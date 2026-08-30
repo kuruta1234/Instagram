@@ -4,7 +4,7 @@
     igtool new        投稿ドラフトを新規作成
     igtool list        投稿一覧を表示
     igtool show         投稿の詳細を表示
-    igtool caption      AIでキャプション/ハッシュタグを生成
+    igtool caption      キャプション/ハッシュタグを手入力で設定
     igtool edit          画像を編集(リサイズ/自動補正/背景除去/透かし/テキスト)
     igtool review        投稿前チェックリストを対話的に実施
     igtool approve       チェック済みの投稿を承認
@@ -24,7 +24,7 @@ from rich.console import Console
 from rich.table import Table
 
 from . import calendar_view, config, image_edit, review, storage
-from .caption import CaptionGenerationError, generate_caption
+from .caption import format_context_for_input, parse_hashtags
 from .models import Post, PostStatus
 
 console = Console()
@@ -40,7 +40,7 @@ def _load_or_fail(post_id: str) -> Post:
 @click.group()
 @click.version_option()
 def main() -> None:
-    """Instagram投稿の下書き作成・AIキャプション生成・画像編集・承認フローを支援するCLI。"""
+    """Instagram投稿の下書き作成・キャプション入力・画像編集・承認フローを支援するCLI。"""
     config.ensure_dirs()
 
 
@@ -66,7 +66,7 @@ def new(topic: str, keywords: tuple[str, ...], tone: str, images: tuple[Path, ..
     post = storage.create(topic=topic, keywords=list(keywords), tone=tone, image_paths=list(images))
     console.print(f"[green]作成しました:[/green] {post.id}")
     console.print(f"  画像 {len(post.images)} 枚を取り込みました")
-    console.print(f"  次は [bold]igtool caption {post.id}[/bold] でキャプションを生成できます")
+    console.print(f"  次は [bold]igtool caption {post.id}[/bold] でキャプションを入力できます")
 
 
 @main.command(name="list")
@@ -127,40 +127,46 @@ def show(post_id: str) -> None:
 @main.command()
 @click.argument("post_id")
 @click.option(
-    "--tone",
-    type=click.Choice(["casual", "formal", "energetic", "elegant"]),
+    "--caption-text",
     default=None,
-    help="省略時は投稿作成時のトーンを使用",
+    help="キャプション文を直接指定する(省略時は対話入力)",
 )
-@click.option("--notes", default="", help="AIへの追加指示(強調したい点など)")
-@click.option("--hashtag-count", default=12, show_default=True)
-@click.option("--no-image", is_flag=True, help="画像を見せずにテキストのみでキャプションを生成")
-def caption(
-    post_id: str, tone: str | None, notes: str, hashtag_count: int, no_image: bool
-) -> None:
-    """AIでキャプションとハッシュタグを生成する(既存の内容は上書き)。"""
+@click.option(
+    "--hashtags",
+    "hashtags_raw",
+    default=None,
+    help="カンマ区切りのハッシュタグを直接指定する(省略時は対話入力)",
+)
+def caption(post_id: str, caption_text: str | None, hashtags_raw: str | None) -> None:
+    """キャプションとハッシュタグを手入力で設定する(既存の内容は上書き)。"""
     post = _load_or_fail(post_id)
-    image_path = None
-    if not no_image:
-        primary = post.primary_image()
-        if primary:
-            rel = primary.edited or primary.original
-            image_path = storage.resolve_image_path(post.id, rel)
 
-    try:
-        result = generate_caption(
-            topic=post.topic,
-            keywords=post.keywords,
-            tone=tone or post.tone,
-            notes=notes,
-            hashtag_count=hashtag_count,
-            image_path=image_path,
+    image_paths = [
+        storage.resolve_image_path(post.id, img.edited or img.original) for img in post.images
+    ]
+
+    console.print(format_context_for_input(post.topic, post.keywords, post.tone, image_paths))
+    console.print("")
+
+    if caption_text is None:
+        console.print(
+            "画像を確認しながらキャプション文を入力してください(複数行可)。空行で入力を終えます。"
         )
-    except CaptionGenerationError as exc:
-        raise click.ClickException(str(exc)) from exc
+        lines: list[str] = []
+        while True:
+            line = click.prompt("キャプション", default="", show_default=False)
+            if line == "":
+                break
+            lines.append(line)
+        caption_text = "\n".join(lines)
 
-    post.caption = str(result["caption"])
-    post.hashtags = list(result["hashtags"])
+    if hashtags_raw is None:
+        hashtags_raw = click.prompt(
+            "ハッシュタグ(カンマ区切り、#は省略可)", default="", show_default=False
+        )
+
+    post.caption = caption_text
+    post.hashtags = parse_hashtags(hashtags_raw)
     # 内容が変わったのでチェック済みフラグはリセットする
     post.checklist.caption_ok = False
     post.checklist.hashtag_ok = False
@@ -169,10 +175,10 @@ def caption(
         post.status = PostStatus.IN_REVIEW
     storage.save(post)
 
-    console.print("[green]キャプションを生成しました[/green]")
-    console.print(post.caption)
+    console.print("[green]キャプションを保存しました[/green]")
+    console.print(post.caption or "(空)")
     console.print("")
-    console.print(" ".join(post.hashtags))
+    console.print(" ".join(post.hashtags) if post.hashtags else "(なし)")
 
 
 @main.command()

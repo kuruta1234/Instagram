@@ -17,9 +17,6 @@ NG_WORDS_PATH = Path(
     os.environ.get("IGTOOL_NG_WORDS_PATH", BASE_DIR / "config" / "ng_words.txt")
 ).resolve()
 
-ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY")
-CLAUDE_MODEL = os.environ.get("IGTOOL_CLAUDE_MODEL", "claude-sonnet-5")
-
 
 def ensure_dirs() -> None:
     POSTS_DIR.mkdir(parents=True, exist_ok=True)
