@@ -1,0 +1,27 @@
+[project]
+name = "ig-toolkit"
+version = "0.1.0"
+description = "Instagram投稿業務を効率化するローカルCLIツール(AIキャプション生成・画像編集・下書き管理・承認フロー)"
+requires-python = ">=3.10"
+dependencies = [
+    "click>=8.1",
+    "Pillow>=10.0",
+    "PyYAML>=6.0",
+    "python-dotenv>=1.0",
+    "anthropic>=0.40",
+    "rich>=13.0",
+]
+
+[project.optional-dependencies]
+bg-removal = ["rembg>=2.0", "onnxruntime>=1.16"]
+dev = ["pytest>=8.0"]
+
+[project.scripts]
+igtool = "ig_toolkit.cli:main"
+
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["ig_toolkit*"]

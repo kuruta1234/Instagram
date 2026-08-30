@@ -1,0 +1,16 @@
+__pycache__/
+*.pyc
+.venv/
+venv/
+*.egg-info/
+build/
+dist/
+
+# 環境変数(APIキーなど)
+.env
+
+# 実際の投稿データ(画像・下書き・エクスポート)はコミットしない
+data/posts/*
+!data/posts/.gitkeep
+data/exports/*
+!data/exports/.gitkeep
