@@ -4,12 +4,6 @@
 <h1>{{ post.topic }} <span class="badge badge-{{ post.status.value }}">{{ post.status.value }}</span></h1>
 <p class="subtitle">{{ post.id }}</p>
 
-<div class="card">
-  <strong>キーワード:</strong> {{ post.keywords | join(', ') if post.keywords else '-' }}<br>
-  <strong>トーン:</strong> {{ post.tone }}<br>
-  <strong>予定日:</strong> {{ post.scheduled_date or '-' }}
-</div>
-
 <h2>画像</h2>
 <div class="image-grid">
   {% for info in image_infos %}
@@ -25,45 +19,26 @@
 
 <h2>キャプション・ハッシュタグ</h2>
 <div class="card">
-<form class="stacked" method="post" action="{{ url_for('igtool.post_caption', post_id=post.id) }}">
-  <label for="caption_text">キャプション</label>
-  <textarea id="caption_text" name="caption_text" rows="5" placeholder="画像を見ながらキャプションを入力してください">{{ post.caption }}</textarea>
+  <form method="post" action="{{ url_for('igtool.post_caption_generate', post_id=post.id) }}">
+    <label for="notes">Claudeへの補足指示(任意)</label>
+    <input type="text" id="notes" name="notes" placeholder="例: 季節限定であることを強調して">
+    <div class="help-text">画像を読み込み、Claude(このマシンにログイン済みの `claude` コマンド)がプロ品質のキャプション・ハッシュタグ案を自動生成します。</div>
+    <div class="btn-row">
+      <button type="submit" class="btn btn-primary">Claudeでキャプションを生成</button>
+    </div>
+  </form>
 
-  <label for="hashtags">ハッシュタグ(カンマ区切り、#は省略可)</label>
-  <input type="text" id="hashtags" name="hashtags" value="{{ post.hashtags | join(', ') }}" placeholder="例: 紅茶, 秋限定">
+  <form class="stacked" method="post" action="{{ url_for('igtool.post_caption', post_id=post.id) }}" style="margin-top:20px;">
+    <label for="caption_text">キャプション</label>
+    <textarea id="caption_text" name="caption_text" rows="5" placeholder="画像を見ながらキャプションを入力・編集してください">{{ post.caption }}</textarea>
 
-  <div class="btn-row">
-    <button type="submit" class="btn btn-primary">保存する</button>
-  </div>
-</form>
-</div>
+    <label for="hashtags">ハッシュタグ(カンマ区切り、#は省略可)</label>
+    <input type="text" id="hashtags" name="hashtags" value="{{ post.hashtags | join(', ') }}" placeholder="例: 紅茶, 秋限定">
 
-<h2>投稿前チェック</h2>
-<div class="card">
-  <div class="checklist-grid">
-    <div class="checklist-item">画像OK: {{ '✅' if post.checklist.image_ok else '未' }}</div>
-    <div class="checklist-item">キャプションOK: {{ '✅' if post.checklist.caption_ok else '未' }}</div>
-    <div class="checklist-item">ハッシュタグOK: {{ '✅' if post.checklist.hashtag_ok else '未' }}</div>
-    <div class="checklist-item">権利関係OK: {{ '✅' if post.checklist.rights_ok else '未' }}</div>
-    <div class="checklist-item">NGワードOK: {{ '✅' if post.checklist.ng_word_ok else '未' }}</div>
-  </div>
-  <div class="btn-row">
-    <a class="btn btn-primary" href="{{ url_for('igtool.post_review', post_id=post.id) }}">チェックリストを開く</a>
-  </div>
-</div>
-
-<h2>スケジュール</h2>
-<div class="card">
-<form class="stacked" method="post" action="{{ url_for('igtool.post_schedule', post_id=post.id) }}">
-  <label for="date">投稿予定日</label>
-  <input type="date" id="date" name="date" value="{{ post.scheduled_date[:10] if post.scheduled_date else '' }}">
-  <label for="time">投稿予定時刻(任意)</label>
-  <input type="time" id="time" name="time">
-  <div class="help-text">承認済み(approved)の投稿のみ設定できます。</div>
-  <div class="btn-row">
-    <button type="submit" class="btn">予定日を設定</button>
-  </div>
-</form>
+    <div class="btn-row">
+      <button type="submit" class="btn">この内容で保存する</button>
+    </div>
+  </form>
 </div>
 
 <h2>エクスポート・投稿</h2>

@@ -2,7 +2,7 @@
 {% block title %}投稿一覧 - ig-toolkit{% endblock %}
 {% block content %}
 <h1>投稿一覧</h1>
-<p class="subtitle">下書きの作成から投稿前チェックまでをここで管理します。</p>
+<p class="subtitle">下書きの作成からエクスポートまでをここで管理します。</p>
 
 <div class="filter-bar">
   <a href="{{ url_for('igtool.posts_list') }}" class="{{ 'active' if not current_status else '' }}">すべて</a>
@@ -21,7 +21,7 @@
   <div class="post-row">
     <div>
       <div class="topic"><a href="{{ url_for('igtool.post_detail', post_id=post.id) }}">{{ post.topic }}</a></div>
-      <div class="meta">{{ post.id }} ・ 更新: {{ post.updated_at }}{% if post.scheduled_date %} ・ 予定: {{ post.scheduled_date }}{% endif %}</div>
+      <div class="meta">{{ post.id }} ・ 更新: {{ post.updated_at }}</div>
     </div>
     <span class="badge badge-{{ post.status.value }}">{{ post.status.value }}</span>
   </div>

@@ -77,13 +77,13 @@ def list_posts(status: PostStatus | None = None) -> list[Post]:
     return posts
 
 
-def create(topic: str, keywords: list[str], tone: str, image_paths: list[Path]) -> Post:
+def create(topic: str, image_paths: list[Path]) -> Post:
     config.ensure_dirs()
     post_id = generate_post_id(topic)
     while exists(post_id):  # 衝突した場合は作り直す(ほぼ発生しない)
         post_id = generate_post_id(topic)
 
-    post = Post(id=post_id, topic=topic, keywords=keywords, tone=tone)
+    post = Post(id=post_id, topic=topic)
 
     orig_dir = original_dir(post_id)
     orig_dir.mkdir(parents=True, exist_ok=True)

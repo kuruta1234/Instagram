@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import calendar as _calendar
 import tempfile
 from pathlib import Path
 
@@ -18,15 +17,14 @@ from flask import (
 )
 from werkzeug.utils import secure_filename
 
-from .. import calendar_view, edit_ops, export_ops, image_edit, review, storage
-from ..caption import describe_image, parse_hashtags
+from .. import edit_ops, export_ops, image_edit, storage
+from ..caption import CaptionGenerationError, describe_image, generate_caption_via_cli, parse_hashtags
 from ..models import Post, PostStatus
 
 bp = Blueprint("igtool", __name__)
 
 WATERMARK_POSITIONS = ["bottom-right", "bottom-left", "top-right", "top-left", "center"]
 TEXT_POSITIONS = ["top", "center", "bottom"]
-TONES = ["casual", "formal", "energetic", "elegant"]
 
 
 def _get_post_or_404(post_id: str) -> Post:
@@ -72,20 +70,17 @@ def posts_list():
 @bp.route("/posts/new", methods=["GET", "POST"])
 def post_new():
     if request.method == "GET":
-        return render_template("post_new.html", tones=TONES)
+        return render_template("post_new.html")
 
     topic = request.form.get("topic", "").strip()
-    keywords_raw = request.form.get("keywords", "")
-    keywords = [k.strip() for k in keywords_raw.split(",") if k.strip()]
-    tone = request.form.get("tone", "casual")
     uploads = [f for f in request.files.getlist("images") if f and f.filename]
 
     if not topic:
         flash("トピックを入力してください", "error")
-        return render_template("post_new.html", tones=TONES), 400
+        return render_template("post_new.html"), 400
     if not uploads:
         flash("画像を1枚以上選択してください", "error")
-        return render_template("post_new.html", tones=TONES), 400
+        return render_template("post_new.html"), 400
 
     with tempfile.TemporaryDirectory() as tmp_dir:
         image_paths: list[Path] = []
@@ -95,7 +90,7 @@ def post_new():
             upload.save(dest)
             image_paths.append(dest)
 
-        post = storage.create(topic=topic, keywords=keywords, tone=tone, image_paths=image_paths)
+        post = storage.create(topic=topic, image_paths=image_paths)
 
     flash(f"投稿を作成しました: {post.id}", "success")
     return redirect(url_for("igtool.post_detail", post_id=post.id))
@@ -117,9 +112,34 @@ def post_caption(post_id: str):
     post = _get_post_or_404(post_id)
     caption_text = request.form.get("caption_text", "")
     hashtags_raw = request.form.get("hashtags", "")
-    review.set_caption(post, caption_text, parse_hashtags(hashtags_raw))
+    post.caption = caption_text
+    post.hashtags = parse_hashtags(hashtags_raw)
     storage.save(post)
     flash("キャプションを保存しました", "success")
+    return redirect(url_for("igtool.post_detail", post_id=post_id))
+
+
+@bp.route("/posts/<post_id>/caption/generate", methods=["POST"])
+def post_caption_generate(post_id: str):
+    post = _get_post_or_404(post_id)
+    if not post.images:
+        flash("画像が登録されていません", "error")
+        return redirect(url_for("igtool.post_detail", post_id=post_id))
+
+    primary = post.primary_image()
+    image_path = storage.resolve_image_path(post.id, primary.edited or primary.original)
+    notes = request.form.get("notes", "")
+
+    try:
+        result = generate_caption_via_cli(topic=post.topic, image_path=image_path, notes=notes)
+    except CaptionGenerationError as exc:
+        flash(str(exc), "error")
+        return redirect(url_for("igtool.post_detail", post_id=post_id))
+
+    post.caption = str(result["caption"])
+    post.hashtags = list(result["hashtags"])
+    storage.save(post)
+    flash("Claudeがキャプション案を作成しました。内容を確認し、必要なら編集して保存してください。", "success")
     return redirect(url_for("igtool.post_detail", post_id=post_id))
 
 
@@ -292,94 +312,6 @@ def reset_image(post_id: str, index: int):
     return redirect(url_for("igtool.image_editor", post_id=post_id, index=index))
 
 
-@bp.route("/posts/<post_id>/review", methods=["GET", "POST"])
-def post_review(post_id: str):
-    post = _get_post_or_404(post_id)
-
-    if request.method == "POST":
-        cl = post.checklist
-        cl.image_ok = "image_ok" in request.form
-        cl.caption_ok = "caption_ok" in request.form
-        cl.hashtag_ok = "hashtag_ok" in request.form
-        cl.rights_ok = "rights_ok" in request.form
-        cl.ng_word_ok = "ng_word_ok" in request.form
-        if post.status == PostStatus.DRAFT:
-            post.status = PostStatus.IN_REVIEW
-        storage.save(post)
-        flash("チェックリストを保存しました", "success")
-        return redirect(url_for("igtool.post_review", post_id=post_id))
-
-    auto_check = review.run_auto_checks(post)
-    return render_template("review.html", post=post, auto_check=auto_check)
-
-
-@bp.route("/posts/<post_id>/approve", methods=["POST"])
-def post_approve(post_id: str):
-    post = _get_post_or_404(post_id)
-    try:
-        review.approve(post)
-    except ValueError as exc:
-        flash(str(exc), "error")
-        return redirect(url_for("igtool.post_review", post_id=post_id))
-    storage.save(post)
-    flash("承認しました", "success")
-    return redirect(url_for("igtool.post_detail", post_id=post_id))
-
-
-@bp.route("/posts/<post_id>/schedule", methods=["POST"])
-def post_schedule(post_id: str):
-    post = _get_post_or_404(post_id)
-    date_str = request.form.get("date", "").strip()
-    time_str = request.form.get("time", "").strip()
-    if not date_str:
-        flash("投稿予定日を入力してください", "error")
-        return redirect(url_for("igtool.post_detail", post_id=post_id))
-
-    scheduled = f"{date_str} {time_str}" if time_str else date_str
-    try:
-        review.schedule(post, scheduled)
-    except ValueError as exc:
-        flash(str(exc), "error")
-        return redirect(url_for("igtool.post_detail", post_id=post_id))
-
-    storage.save(post)
-    flash(f"予定日を設定しました: {scheduled}", "success")
-    return redirect(url_for("igtool.post_detail", post_id=post_id))
-
-
-@bp.route("/calendar")
-def calendar_page():
-    default_year, default_month = calendar_view.today_year_month()
-    year = request.args.get("year", type=int) or default_year
-    month = request.args.get("month", type=int) or default_month
-
-    if month < 1:
-        year, month = year - 1, 12
-    elif month > 12:
-        year, month = year + 1, 1
-
-    posts = storage.list_posts()
-    grouped = calendar_view.posts_by_day(posts, year, month)
-    weeks = _calendar.Calendar(firstweekday=6).monthdayscalendar(year, month)
-
-    prev_month = 12 if month == 1 else month - 1
-    prev_year = year - 1 if month == 1 else year
-    next_month = 1 if month == 12 else month + 1
-    next_year = year + 1 if month == 12 else year
-
-    return render_template(
-        "calendar.html",
-        year=year,
-        month=month,
-        weeks=weeks,
-        grouped=grouped,
-        prev_year=prev_year,
-        prev_month=prev_month,
-        next_year=next_year,
-        next_month=next_month,
-    )
-
-
 @bp.route("/posts/<post_id>/export", methods=["POST"])
 def post_export(post_id: str):
     post = _get_post_or_404(post_id)
@@ -391,7 +323,7 @@ def post_export(post_id: str):
 @bp.route("/posts/<post_id>/mark-posted", methods=["POST"])
 def post_mark_posted(post_id: str):
     post = _get_post_or_404(post_id)
-    review.mark_posted(post)
+    post.status = PostStatus.POSTED
     storage.save(post)
     flash("投稿済みにしました", "success")
     return redirect(url_for("igtool.post_detail", post_id=post_id))

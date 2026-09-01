@@ -12,9 +12,7 @@ def test_create_and_load(isolated_data_dir, tmp_path):
     from ig_toolkit import storage
 
     img_path = _make_test_image(tmp_path / "sample.jpg")
-    post = storage.create(
-        topic="秋の新作紅茶", keywords=["紅茶", "秋"], tone="casual", image_paths=[img_path]
-    )
+    post = storage.create(topic="秋の新作紅茶", image_paths=[img_path])
 
     assert storage.exists(post.id)
     loaded = storage.load(post.id)
@@ -29,7 +27,7 @@ def test_list_posts_and_delete(isolated_data_dir, tmp_path):
     from ig_toolkit import storage
 
     img_path = _make_test_image(tmp_path / "sample2.jpg")
-    post = storage.create(topic="商品A", keywords=[], tone="casual", image_paths=[img_path])
+    post = storage.create(topic="商品A", image_paths=[img_path])
 
     assert post.id in storage.list_ids()
     posts = storage.list_posts()

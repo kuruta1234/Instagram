@@ -1,11 +1,12 @@
-from ig_toolkit.models import ImageAsset, Post, PostStatus, ReviewChecklist
+from ig_toolkit.models import ImageAsset, Post, PostStatus
 
 
 def test_post_roundtrip_dict():
     post = Post(
         id="20260101-test-abcd",
         topic="テスト投稿",
-        keywords=["a", "b"],
+        caption="キャプション本文",
+        hashtags=["#a", "#b"],
         images=[ImageAsset(original="images/original/x.jpg")],
     )
     data = post.to_dict()
@@ -13,13 +14,12 @@ def test_post_roundtrip_dict():
 
     assert restored.id == post.id
     assert restored.topic == post.topic
-    assert restored.keywords == post.keywords
+    assert restored.caption == post.caption
+    assert restored.hashtags == post.hashtags
     assert restored.images[0].original == "images/original/x.jpg"
     assert restored.status == PostStatus.DRAFT
 
 
-def test_checklist_all_passed():
-    cl = ReviewChecklist()
-    assert not cl.all_passed()
-    cl.image_ok = cl.caption_ok = cl.hashtag_ok = cl.rights_ok = cl.ng_word_ok = True
-    assert cl.all_passed()
+def test_post_status_values():
+    assert PostStatus.DRAFT.value == "draft"
+    assert PostStatus.POSTED.value == "posted"

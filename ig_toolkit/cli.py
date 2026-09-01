@@ -3,18 +3,14 @@
 GUIで操作したい場合は `igtool-gui` を実行するとブラウザで使えるWebアプリが起動する。
 
 主なコマンド:
-    igtool new        投稿ドラフトを新規作成
-    igtool list        投稿一覧を表示
-    igtool show         投稿の詳細を表示
-    igtool caption      キャプション/ハッシュタグを手入力で設定
-    igtool edit          画像を編集(リサイズ/自動補正/背景除去/透かし/テキスト)
-    igtool review        投稿前チェックリストを対話的に実施
-    igtool approve       チェック済みの投稿を承認
-    igtool schedule      投稿予定日を設定
-    igtool calendar      月間の投稿予定カレンダーを表示
-    igtool export        承認済み投稿を手動投稿用にエクスポート
-    igtool mark-posted  手動投稿が完了した投稿にマークする
-    igtool delete        投稿ドラフトを削除
+    igtool new         投稿ドラフトを新規作成
+    igtool list         投稿一覧を表示
+    igtool show          投稿の詳細を表示
+    igtool caption       Claude Code CLI経由でキャプション/ハッシュタグを自動生成(手入力も可)
+    igtool edit           画像を編集(リサイズ/自動補正/背景除去/透かし/テキスト)
+    igtool export         投稿用の画像とキャプションをエクスポート
+    igtool mark-posted   手動投稿が完了した投稿にマークする
+    igtool delete         投稿ドラフトを削除
 """
 
 from __future__ import annotations
@@ -25,8 +21,8 @@ import click
 from rich.console import Console
 from rich.table import Table
 
-from . import calendar_view, config, edit_ops, export_ops, image_edit, review, storage
-from .caption import format_context_for_input, parse_hashtags
+from . import config, edit_ops, export_ops, image_edit, storage
+from .caption import CaptionGenerationError, format_context_for_input, generate_caption_via_cli, parse_hashtags
 from .models import Post, PostStatus
 
 console = Console()
@@ -42,19 +38,12 @@ def _load_or_fail(post_id: str) -> Post:
 @click.group()
 @click.version_option()
 def main() -> None:
-    """Instagram投稿の下書き作成・キャプション入力・画像編集・承認フローを支援するCLI。"""
+    """Instagram投稿の下書き作成・キャプション作成・画像編集を支援するCLI。"""
     config.ensure_dirs()
 
 
 @main.command()
 @click.option("--topic", required=True, help="投稿のテーマ・商品名など")
-@click.option("--keyword", "keywords", multiple=True, help="含めたいキーワード(複数指定可)")
-@click.option(
-    "--tone",
-    type=click.Choice(["casual", "formal", "energetic", "elegant"]),
-    default="casual",
-    show_default=True,
-)
 @click.option(
     "--image",
     "images",
@@ -63,12 +52,12 @@ def main() -> None:
     type=click.Path(exists=True, dir_okay=False, path_type=Path),
     help="投稿に使う画像ファイル(複数指定可)",
 )
-def new(topic: str, keywords: tuple[str, ...], tone: str, images: tuple[Path, ...]) -> None:
+def new(topic: str, images: tuple[Path, ...]) -> None:
     """投稿ドラフトを新規作成する。"""
-    post = storage.create(topic=topic, keywords=list(keywords), tone=tone, image_paths=list(images))
+    post = storage.create(topic=topic, image_paths=list(images))
     console.print(f"[green]作成しました:[/green] {post.id}")
     console.print(f"  画像 {len(post.images)} 枚を取り込みました")
-    console.print(f"  次は [bold]igtool caption {post.id}[/bold] でキャプションを入力できます")
+    console.print(f"  次は [bold]igtool caption {post.id}[/bold] でキャプションを作成できます")
 
 
 @main.command(name="list")
@@ -90,10 +79,9 @@ def list_cmd(status: str | None) -> None:
     table.add_column("ID")
     table.add_column("ステータス")
     table.add_column("トピック")
-    table.add_column("予定日")
     table.add_column("更新日時")
     for p in posts:
-        table.add_row(p.id, p.status.value, p.topic, p.scheduled_date or "-", p.updated_at)
+        table.add_row(p.id, p.status.value, p.topic, p.updated_at)
     console.print(table)
 
 
@@ -104,9 +92,6 @@ def show(post_id: str) -> None:
     post = _load_or_fail(post_id)
     console.print(f"[bold]{post.id}[/bold]  ({post.status.value})")
     console.print(f"トピック: {post.topic}")
-    console.print(f"キーワード: {', '.join(post.keywords) or '-'}")
-    console.print(f"トーン: {post.tone}")
-    console.print(f"予定日: {post.scheduled_date or '-'}")
     console.print("")
     console.print("[bold]キャプション:[/bold]")
     console.print(post.caption or "(未生成)")
@@ -118,56 +103,70 @@ def show(post_id: str) -> None:
     for i, img in enumerate(post.images):
         state = "編集済み" if img.edited else "元画像のまま"
         console.print(f"  [{i}] {img.original}  ({state})")
-    console.print("")
-    cl = post.checklist
-    console.print("[bold]チェックリスト:[/bold]")
-    console.print(f"  画像OK: {cl.image_ok}  キャプションOK: {cl.caption_ok}")
-    console.print(f"  ハッシュタグOK: {cl.hashtag_ok}  権利関係OK: {cl.rights_ok}")
-    console.print(f"  NGワードOK: {cl.ng_word_ok}")
 
 
 @main.command()
 @click.argument("post_id")
-@click.option(
-    "--caption-text",
-    default=None,
-    help="キャプション文を直接指定する(省略時は対話入力)",
-)
-@click.option(
-    "--hashtags",
-    "hashtags_raw",
-    default=None,
-    help="カンマ区切りのハッシュタグを直接指定する(省略時は対話入力)",
-)
-def caption(post_id: str, caption_text: str | None, hashtags_raw: str | None) -> None:
-    """キャプションとハッシュタグを手入力で設定する(既存の内容は上書き)。"""
+@click.option("--notes", default="", help="AIへの追加指示(強調したい点など)")
+@click.option("--hashtag-count", default=10, show_default=True)
+@click.option("--manual", is_flag=True, help="AI生成を使わず手入力する")
+@click.option("--caption-text", default=None, help="キャプション文を直接指定する")
+@click.option("--hashtags", "hashtags_raw", default=None, help="カンマ区切りのハッシュタグを直接指定する")
+def caption(
+    post_id: str,
+    notes: str,
+    hashtag_count: int,
+    manual: bool,
+    caption_text: str | None,
+    hashtags_raw: str | None,
+) -> None:
+    """画像を見てClaudeがキャプション/ハッシュタグを自動生成する(--manualで手入力も可)。"""
     post = _load_or_fail(post_id)
 
-    image_paths = [
-        storage.resolve_image_path(post.id, img.edited or img.original) for img in post.images
-    ]
+    if not post.images:
+        raise click.ClickException("画像が登録されていません。先に `igtool new` で画像を追加してください。")
 
-    console.print(format_context_for_input(post.topic, post.keywords, post.tone, image_paths))
-    console.print("")
+    primary = post.primary_image()
+    image_path = storage.resolve_image_path(post.id, primary.edited or primary.original)
 
-    if caption_text is None:
-        console.print(
-            "画像を確認しながらキャプション文を入力してください(複数行可)。空行で入力を終えます。"
-        )
-        lines: list[str] = []
-        while True:
-            line = click.prompt("キャプション", default="", show_default=False)
-            if line == "":
-                break
-            lines.append(line)
-        caption_text = "\n".join(lines)
+    if caption_text is None and hashtags_raw is None and not manual:
+        console.print(f"画像を確認してキャプションを生成しています... ({image_path.name})")
+        try:
+            result = generate_caption_via_cli(
+                topic=post.topic, image_path=image_path, hashtag_count=hashtag_count, notes=notes
+            )
+        except CaptionGenerationError as exc:
+            raise click.ClickException(str(exc)) from exc
+        caption_text = str(result["caption"])
+        hashtags = list(result["hashtags"])
+        console.print("[green]AIによる下書きを作成しました(内容は自由に手直しできます)[/green]")
+    else:
+        image_paths = [
+            storage.resolve_image_path(post.id, img.edited or img.original) for img in post.images
+        ]
+        console.print(format_context_for_input(post.topic, image_paths))
+        console.print("")
 
-    if hashtags_raw is None:
-        hashtags_raw = click.prompt(
-            "ハッシュタグ(カンマ区切り、#は省略可)", default="", show_default=False
-        )
+        if caption_text is None:
+            console.print(
+                "画像を確認しながらキャプション文を入力してください(複数行可)。空行で入力を終えます。"
+            )
+            lines: list[str] = []
+            while True:
+                line = click.prompt("キャプション", default="", show_default=False)
+                if line == "":
+                    break
+                lines.append(line)
+            caption_text = "\n".join(lines)
 
-    review.set_caption(post, caption_text, parse_hashtags(hashtags_raw))
+        if hashtags_raw is None:
+            hashtags_raw = click.prompt(
+                "ハッシュタグ(カンマ区切り、#は省略可)", default="", show_default=False
+            )
+        hashtags = parse_hashtags(hashtags_raw)
+
+    post.caption = caption_text
+    post.hashtags = hashtags
     storage.save(post)
 
     console.print("[green]キャプションを保存しました[/green]")
@@ -207,7 +206,7 @@ def edit(
     text: str | None,
     text_position: str,
 ) -> None:
-    """画像を編集する(何も指定しない場合は元画像をそのまま編集用にコピー)。"""
+    """画像を編集する(中央固定のクロップ。任意範囲を選びたい場合はGUIを使用)。"""
     post = _load_or_fail(post_id)
     if image_index >= len(post.images):
         raise click.ClickException(f"画像番号が範囲外です(0〜{len(post.images) - 1})")
@@ -247,108 +246,11 @@ def edit(
         console.print(f"[yellow]注意:[/yellow] {w}")
 
 
-@main.command(name="review")
-@click.argument("post_id")
-def review_interactive(post_id: str) -> None:
-    """投稿前チェックリストを対話的に実施する。"""
-    post = _load_or_fail(post_id)
-    result = review.run_auto_checks(post)
-
-    console.print(f"[bold]{post.id}[/bold] のチェックを開始します")
-
-    if result.ng_word_hits:
-        console.print(f"[red]NGワード検出:[/red] {', '.join(result.ng_word_hits)}")
-    else:
-        console.print("[green]NGワードは検出されませんでした[/green]")
-
-    if result.image_warnings:
-        for path, warnings in result.image_warnings.items():
-            for w in warnings:
-                console.print(f"[yellow]画像警告 ({path}):[/yellow] {w}")
-    else:
-        console.print("[green]画像サイズの警告はありません[/green]")
-
-    cl = post.checklist
-    cl.ng_word_ok = click.confirm(
-        "NGワードチェックを完了としますか？", default=not result.ng_word_hits
-    )
-    cl.image_ok = click.confirm(
-        "画像の内容・サイズを確認しましたか？", default=not result.image_warnings
-    )
-    cl.caption_ok = click.confirm(
-        "キャプション文面を確認しましたか？", default=not result.caption_empty
-    )
-    cl.hashtag_ok = click.confirm(
-        "ハッシュタグを確認しましたか？", default=not result.hashtags_empty
-    )
-    cl.rights_ok = click.confirm("画像の著作権・使用許諾に問題ないことを確認しましたか？", default=False)
-
-    if post.status == PostStatus.DRAFT:
-        post.status = PostStatus.IN_REVIEW
-    storage.save(post)
-
-    if cl.all_passed():
-        if click.confirm("チェックが全て完了しました。この投稿を承認しますか？", default=True):
-            review.approve(post)
-            storage.save(post)
-            console.print("[green]承認しました。次は `igtool schedule` または `igtool export` へ。[/green]")
-    else:
-        console.print("[yellow]未完了の項目があります。全て完了すると承認できます。[/yellow]")
-
-
-@main.command()
-@click.argument("post_id")
-def approve(post_id: str) -> None:
-    """チェックリストが完了している投稿を承認する。"""
-    post = _load_or_fail(post_id)
-    try:
-        review.approve(post)
-    except ValueError as exc:
-        raise click.ClickException(f"{exc} `igtool review {post_id}` を先に実施してください。") from exc
-    storage.save(post)
-    console.print(f"[green]承認しました:[/green] {post.id}")
-
-
-@main.command()
-@click.argument("post_id")
-@click.option("--date", "date_str", required=True, help="投稿予定日 (YYYY-MM-DD)")
-@click.option("--time", "time_str", default=None, help="投稿予定時刻 (HH:MM、任意)")
-def schedule(post_id: str, date_str: str, time_str: str | None) -> None:
-    """承認済みの投稿に予定日を設定する。"""
-    post = _load_or_fail(post_id)
-    scheduled = f"{date_str} {time_str}" if time_str else date_str
-    try:
-        review.schedule(post, scheduled)
-    except ValueError as exc:
-        raise click.ClickException(str(exc)) from exc
-    storage.save(post)
-    console.print(f"[green]予定日を設定しました:[/green] {post.id} -> {scheduled}")
-
-
-@main.command()
-@click.option("--year", type=int, default=None)
-@click.option("--month", type=int, default=None)
-def calendar(year: int | None, month: int | None) -> None:
-    """月間の投稿予定カレンダーを表示する。"""
-    default_year, default_month = calendar_view.today_year_month()
-    year = year or default_year
-    month = month or default_month
-    posts = storage.list_posts()
-    console.print(calendar_view.render_text_calendar(posts, year, month))
-
-
 @main.command()
 @click.argument("post_id")
 def export(post_id: str) -> None:
-    """承認済み投稿を手動投稿用のフォルダにエクスポートする(画像+キャプションテキスト)。"""
+    """投稿用の画像とキャプションテキストをエクスポートする(手動投稿用)。"""
     post = _load_or_fail(post_id)
-    if post.status not in (PostStatus.APPROVED, PostStatus.SCHEDULED, PostStatus.POSTED):
-        if not click.confirm(
-            f"この投稿はまだ承認されていません(現在: {post.status.value})。エクスポートを続けますか？",
-            default=False,
-        ):
-            return
-
     export_dir = export_ops.export_post(post)
 
     console.print(f"[green]エクスポートしました:[/green] {export_dir}")
@@ -361,7 +263,7 @@ def export(post_id: str) -> None:
 def mark_posted(post_id: str) -> None:
     """手動投稿が完了した投稿に「投稿済み」のマークを付ける。"""
     post = _load_or_fail(post_id)
-    review.mark_posted(post)
+    post.status = PostStatus.POSTED
     storage.save(post)
     console.print(f"[green]投稿済みにしました:[/green] {post.id}")
 

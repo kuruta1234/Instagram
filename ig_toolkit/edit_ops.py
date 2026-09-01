@@ -30,7 +30,6 @@ def save_edited(post: Post, asset: ImageAsset, img: Image.Image, edit_names: lis
 
     asset.edited = str(dest_path.relative_to(storage.post_dir(post.id)))
     asset.edits.extend(edit_names)
-    post.checklist.image_ok = False
 
 
 def reset_image(post: Post, asset: ImageAsset) -> None:
@@ -41,4 +40,3 @@ def reset_image(post: Post, asset: ImageAsset) -> None:
             path.unlink()
     asset.edited = None
     asset.edits = []
-    post.checklist.image_ok = False

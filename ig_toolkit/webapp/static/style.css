@@ -87,9 +87,6 @@ h3 { font-size: 1rem; margin: 16px 0 8px; }
   white-space: nowrap;
 }
 .badge-draft { background: #eee; color: #666; }
-.badge-in_review { background: #fff4d6; color: #9a6b00; }
-.badge-approved { background: #e2f0ff; color: #1660c9; }
-.badge-scheduled { background: #ece2ff; color: #6244e0; }
 .badge-posted { background: var(--success-bg); color: var(--success); }
 
 .filter-bar { margin-bottom: 16px; }
@@ -161,20 +158,6 @@ form.stacked textarea { resize: vertical; }
 .image-tile .tile-body { padding: 10px; font-size: 0.8rem; }
 .image-tile .tile-body .desc { color: var(--text-muted); margin-bottom: 6px; }
 
-.checklist-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 10px; }
-.checklist-item {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 8px 10px;
-  border-radius: 8px;
-  background: #f2f2f7;
-}
-.checklist-item input { width: auto; }
-
-.warning-box { background: #fff4d6; color: #9a6b00; padding: 10px 14px; border-radius: 8px; margin: 6px 0; font-size: 0.9rem; }
-.ok-box { background: var(--success-bg); color: var(--success); padding: 10px 14px; border-radius: 8px; margin: 6px 0; font-size: 0.9rem; }
-
 /* 画像エディタ */
 .editor-layout { display: flex; gap: 24px; flex-wrap: wrap; align-items: flex-start; }
 .editor-canvas { flex: 1 1 480px; max-width: 640px; }
@@ -186,19 +169,3 @@ form.stacked textarea { resize: vertical; }
 .op-section { border-top: 1px solid var(--border); padding-top: 14px; margin-top: 14px; }
 .op-section h3 { margin-top: 0; }
 .edits-log { color: var(--text-muted); font-size: 0.8rem; margin-top: 6px; }
-
-/* カレンダー */
-.calendar-nav { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; }
-.calendar-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 6px; }
-.calendar-cell {
-  min-height: 90px;
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  padding: 6px;
-  background: #fff;
-  font-size: 0.75rem;
-}
-.calendar-cell .day-num { font-weight: 700; margin-bottom: 4px; }
-.calendar-cell .day-post { display: block; margin-bottom: 3px; padding: 2px 4px; border-radius: 4px; background: #ece2ff; color: #6244e0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.calendar-cell.empty { background: transparent; border: none; }
-.calendar-weekday { text-align: center; font-weight: 600; color: var(--text-muted); font-size: 0.8rem; padding-bottom: 4px; }
