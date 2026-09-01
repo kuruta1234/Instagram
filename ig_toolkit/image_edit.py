@@ -231,33 +231,53 @@ def _wrap_text(text: str, font, max_width: int, draw: ImageDraw.ImageDraw) -> li
     return lines
 
 
-def illustrate(img: Image.Image, colors: int = 18, edge_strength: int = 60) -> Image.Image:
-    """写真を色数を落としたフラットな配色+黒い輪郭線の「イラスト風」に変換する。
+def illustrate(
+    img: Image.Image,
+    colors: int = 24,
+    edge_strength: int = 55,
+    brightness: float = 1.08,
+    saturation: float = 1.6,
+    line_color: tuple[int, int, int] = (90, 65, 55),
+) -> Image.Image:
+    """写真を明るく鮮やかな配色+やわらかい輪郭線の「かわいいイラスト風」に変換する。
 
     OpenCV等の追加インストールなしで動作するよう、Pillow標準機能のみで実装した
-    簡易カートゥーン化(減色+輪郭線抽出)。colorsで配色の数(少ないほどフラットに)、
-    edge_strengthで輪郭線の出やすさ(大きいほど線が増える)を調整できる。
+    簡易カートゥーン化(彩度・明るさアップ+減色+輪郭線抽出)。colorsで配色の数
+    (多いほど頬の赤みなど細かい色も残りやすい)、edge_strengthで輪郭線の出やすさ、
+    brightness/saturationで明るさ・鮮やかさ、line_colorで輪郭線の色を調整できる。
+    輪郭線は黒ではなくやわらかい焦げ茶色を既定にし、硬い印象にならないようにしている。
     """
     rgb = img.convert("RGB")
 
-    # 1. 細部・ノイズを平滑化してベタ塗りに近づける
-    smooth = rgb
-    for _ in range(3):
+    # 1. 明るく鮮やかにして、かわいい印象のベースを作る
+    vivid = ImageEnhance.Color(rgb).enhance(saturation)
+    vivid = ImageEnhance.Brightness(vivid).enhance(brightness)
+
+    # 2. 細部・ノイズを平滑化してベタ塗りに近づける
+    smooth = vivid
+    for _ in range(5):
         smooth = smooth.filter(ImageFilter.SMOOTH_MORE)
 
-    # 2. 減色してポスター風のフラットな配色にする
+    # 3. 減色してポスター風のフラットな配色にする
     quantized = smooth.quantize(colors=max(4, colors), method=Image.MEDIANCUT).convert("RGB")
 
-    # 3. 輪郭線を抽出し、閾値処理して「線画」を作る
-    gray = rgb.convert("L").filter(ImageFilter.MedianFilter(size=9))
+    # 4. 輪郭線を抽出し、閾値処理して「線画」を作る(画像の外周は誤検出として除外)。
+    #    背景のざらつき(ノイズ)を輪郭と誤検出しないよう、あらかじめしっかりぼかしておく。
+    gray = rgb.convert("L").filter(ImageFilter.GaussianBlur(1.2))
+    gray = gray.filter(ImageFilter.MedianFilter(size=13))
     edges = gray.filter(ImageFilter.FIND_EDGES)
     edges = ImageOps.autocontrast(edges, cutoff=1)
     line_mask = edges.point(lambda p: 255 if p > (255 - edge_strength) else 0)
     line_mask = line_mask.filter(ImageFilter.MaxFilter(3))
+    ImageDraw.Draw(line_mask).rectangle(
+        [0, 0, line_mask.width - 1, line_mask.height - 1], outline=0, width=2
+    )
+    line_mask = line_mask.filter(ImageFilter.GaussianBlur(0.8))
+    line_mask = line_mask.point(lambda p: 255 if p > 160 else 0)
 
-    # 4. 配色の上に輪郭線を重ねて完成
+    # 5. 配色の上にやわらかい色の輪郭線を重ねて完成
     result = quantized.copy()
-    ink = Image.new("RGB", result.size, (25, 22, 20))
+    ink = Image.new("RGB", result.size, line_color)
     result.paste(ink, mask=line_mask)
     return result
 
