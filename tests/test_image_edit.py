@@ -58,6 +58,60 @@ def test_parse_hex_color():
     assert image_edit.parse_hex_color("invalid", default=(1, 2, 3)) == (1, 2, 3)
 
 
+def _find_color_bbox(img, color, tol=30):
+    px = img.convert("RGB").load()
+    w, h = img.size
+    min_x = min_y = max_x = max_y = None
+    for y in range(h):
+        for x in range(w):
+            r, g, b = px[x, y]
+            if abs(r - color[0]) <= tol and abs(g - color[1]) <= tol and abs(b - color[2]) <= tol:
+                if min_x is None or x < min_x:
+                    min_x = x
+                if max_x is None or x > max_x:
+                    max_x = x
+                if min_y is None or y < min_y:
+                    min_y = y
+                if max_y is None or y > max_y:
+                    max_y = y
+    return min_x, min_y, max_x, max_y
+
+
+def test_add_text_overlay_free_position_matches_requested_ratio():
+    img = Image.new("RGB", (400, 400), color=(0, 0, 0))
+    out = image_edit.add_text_overlay(
+        img, "A", x=0.25, y=0.75, font_size=80, color=(255, 0, 0), stroke_width=0
+    ).convert("RGB")
+
+    bbox = _find_color_bbox(out, (255, 0, 0))
+    assert bbox[0] is not None, "テキストのピクセルが見つかりません"
+    center_x = (bbox[0] + bbox[2]) / 2
+    center_y = (bbox[1] + bbox[3]) / 2
+    assert abs(center_x - 400 * 0.25) < 40
+    assert abs(center_y - 400 * 0.75) < 40
+
+
+def test_add_text_overlay_default_position_is_bottom_center():
+    img = Image.new("RGB", (400, 400), color=(0, 0, 0))
+    out = image_edit.add_text_overlay(
+        img, "A", position="bottom", font_size=80, color=(255, 0, 0), stroke_width=0
+    ).convert("RGB")
+
+    bbox = _find_color_bbox(out, (255, 0, 0))
+    assert bbox[0] is not None
+    center_x = (bbox[0] + bbox[2]) / 2
+    assert abs(center_x - 200) < 40  # positionのみ指定時は画像全体で水平中央揃え
+    assert bbox[3] > 300  # 下寄りに配置されている
+
+
+def test_add_text_overlay_xy_clamped_to_valid_range():
+    img = Image.new("RGB", (200, 200), color=(0, 0, 0))
+    out = image_edit.add_text_overlay(
+        img, "A", x=-5, y=10, font_size=40, color=(255, 0, 0), stroke_width=0
+    )
+    assert out.size == img.size  # 範囲外の値でも例外にならずクランプされる
+
+
 def test_illustrate_preserves_size_and_changes_pixels():
     img = Image.new("RGB", (300, 300), color=(200, 100, 50))
     for x in range(150, 300):

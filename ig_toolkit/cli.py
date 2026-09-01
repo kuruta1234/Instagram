@@ -6,7 +6,7 @@ GUIで操作したい場合は `igtool-gui` を実行するとブラウザで使
     igtool new         投稿ドラフトを新規作成
     igtool list         投稿一覧を表示
     igtool show          投稿の詳細を表示
-    igtool caption       Claude Code CLI経由でキャプション/ハッシュタグを自動生成(手入力も可)
+    igtool caption       Claude Code CLI経由でキャプション/ハッシュタグを自動生成(使えない場合は手入力)
     igtool edit           画像を編集(リサイズ/自動補正/背景除去/透かし/テキスト)
     igtool export         投稿用の画像とキャプションをエクスポート
     igtool mark-posted   手動投稿が完了した投稿にマークする
@@ -22,7 +22,12 @@ from rich.console import Console
 from rich.table import Table
 
 from . import config, edit_ops, export_ops, image_edit, storage
-from .caption import CaptionGenerationError, format_context_for_input, generate_caption, parse_hashtags
+from .caption import (
+    CaptionGenerationError,
+    format_context_for_input,
+    generate_caption_via_cli,
+    parse_hashtags,
+)
 from .models import Post, PostStatus
 
 console = Console()
@@ -120,7 +125,11 @@ def caption(
     caption_text: str | None,
     hashtags_raw: str | None,
 ) -> None:
-    """画像を見てClaudeがキャプション/ハッシュタグを自動生成する(--manualで手入力も可)。"""
+    """画像を見てClaudeがキャプション/ハッシュタグを自動生成する。
+
+    `claude` コマンドが使えない場合(Freeプランなど)は、Anthropic APIキーには
+    フォールバックせず、そのまま手入力モードに切り替わる。--manualで最初から手入力も可。
+    """
     post = _load_or_fail(post_id)
 
     if not post.images:
@@ -129,18 +138,23 @@ def caption(
     primary = post.primary_image()
     image_path = storage.resolve_image_path(post.id, primary.edited or primary.original)
 
-    if caption_text is None and hashtags_raw is None and not manual:
+    hashtags: list[str] | None = None
+    attempt_ai = caption_text is None and hashtags_raw is None and not manual
+
+    if attempt_ai:
         console.print(f"画像を確認してキャプションを生成しています... ({image_path.name})")
         try:
-            result = generate_caption(
+            result = generate_caption_via_cli(
                 topic=post.topic, image_path=image_path, hashtag_count=hashtag_count, notes=notes
             )
+            caption_text = str(result["caption"])
+            hashtags = list(result["hashtags"])
+            console.print("[green]AIによる下書きを作成しました(内容は自由に手直しできます)[/green]")
         except CaptionGenerationError as exc:
-            raise click.ClickException(str(exc)) from exc
-        caption_text = str(result["caption"])
-        hashtags = list(result["hashtags"])
-        console.print("[green]AIによる下書きを作成しました(内容は自由に手直しできます)[/green]")
-    else:
+            console.print(f"[yellow]AI生成を利用できません: {exc}[/yellow]")
+            console.print("[yellow]手入力モードに切り替えます。[/yellow]")
+
+    if caption_text is None or hashtags is None:
         image_paths = [
             storage.resolve_image_path(post.id, img.edited or img.original) for img in post.images
         ]
@@ -159,11 +173,12 @@ def caption(
                 lines.append(line)
             caption_text = "\n".join(lines)
 
-        if hashtags_raw is None:
-            hashtags_raw = click.prompt(
-                "ハッシュタグ(カンマ区切り、#は省略可)", default="", show_default=False
-            )
-        hashtags = parse_hashtags(hashtags_raw)
+        if hashtags is None:
+            if hashtags_raw is None:
+                hashtags_raw = click.prompt(
+                    "ハッシュタグ(カンマ区切り、#は省略可)", default="", show_default=False
+                )
+            hashtags = parse_hashtags(hashtags_raw)
 
     post.caption = caption_text
     post.hashtags = hashtags
@@ -206,6 +221,18 @@ def caption(
 @click.option(
     "--text-color", default="#ffffff", show_default=True, help="テキストの色(#rrggbb形式)"
 )
+@click.option(
+    "--text-x",
+    type=float,
+    default=None,
+    help="テキストの水平位置(0.0=左端〜1.0=右端の比率、省略時は中央/--text-positionに従う)",
+)
+@click.option(
+    "--text-y",
+    type=float,
+    default=None,
+    help="テキストの垂直位置(0.0=上端〜1.0=下端の比率、指定すると--text-positionより優先)",
+)
 @click.option("--illustrate", is_flag=True, help="写真をイラスト風(減色+輪郭線)に変換する")
 def edit(
     post_id: str,
@@ -220,6 +247,8 @@ def edit(
     text_font: str,
     text_size: int,
     text_color: str,
+    text_x: float | None,
+    text_y: float | None,
     illustrate: bool,
 ) -> None:
     """画像を編集する(中央固定のクロップ。任意範囲を選びたい場合はGUIを使用)。"""
@@ -252,6 +281,8 @@ def edit(
         img = image_edit.add_text_overlay(
             img,
             text,
+            x=text_x,
+            y=text_y,
             position=text_position,
             font=text_font,
             font_size=text_size,

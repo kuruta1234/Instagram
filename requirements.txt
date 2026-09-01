@@ -7,7 +7,3 @@ Flask>=3.0
 
 # 任意: 背景除去を使う場合は以下も追加でインストール
 # pip install rembg onnxruntime
-
-# 任意: Claude Code CLIが使えない環境でAnthropic APIキーによる
-# キャプション生成フォールバックを使う場合は以下も追加でインストール
-# pip install anthropic

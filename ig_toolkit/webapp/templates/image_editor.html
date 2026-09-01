@@ -99,15 +99,17 @@
 
     <div class="op-section">
       <h3>テキストを追加</h3>
-      <form class="stacked" method="post" action="{{ url_for('igtool.apply_text', post_id=post.id, index=index) }}">
-        <input type="text" name="overlay_text" placeholder="画像に合成するテキスト" required>
+      <p class="help-text">プレビュー上のテキストをドラッグ(またはクリック)して、好きな位置に配置できます。</p>
 
-        <label for="textPosition">位置</label>
-        <select name="text_position" id="textPosition">
-          {% for pos in text_positions %}
-          <option value="{{ pos }}">{{ pos }}</option>
-          {% endfor %}
-        </select>
+      <div class="text-preview-wrap" id="textPreviewWrap">
+        <img id="textPreviewImage"
+             src="{{ url_for('igtool.serve_image', post_id=post.id, index=index, variant='current') }}?t={{ (post, index) | cache_bust }}"
+             alt="">
+        <div id="textMarker" class="text-marker">ここにテキスト</div>
+      </div>
+
+      <form class="stacked" method="post" action="{{ url_for('igtool.apply_text', post_id=post.id, index=index) }}" id="textForm">
+        <input type="text" name="overlay_text" id="overlayTextInput" placeholder="画像に合成するテキスト" required>
 
         <label for="textFont">フォント</label>
         <select name="text_font" id="textFont">
@@ -128,6 +130,15 @@
             <input type="color" name="text_color" id="textColor" value="#ffffff">
           </div>
         </div>
+
+        <div class="aspect-buttons" id="textPresetButtons" style="margin-top:10px;">
+          <button type="button" data-x="0.5" data-y="0.12">上</button>
+          <button type="button" data-x="0.5" data-y="0.5">中央</button>
+          <button type="button" data-x="0.5" data-y="0.88" class="active">下</button>
+        </div>
+
+        <input type="hidden" name="text_x" id="textX" value="0.5">
+        <input type="hidden" name="text_y" id="textY" value="0.88">
 
         <div class="btn-row">
           <button type="submit" class="btn">テキストを追加</button>
@@ -205,5 +216,85 @@ const customInputs = document.getElementById('customSizeInputs');
 resizePreset.addEventListener('change', function () {
   customInputs.hidden = resizePreset.value !== 'custom';
 });
+
+// --- テキストのドラッグ配置 ---
+const previewWrap = document.getElementById('textPreviewWrap');
+const previewImage = document.getElementById('textPreviewImage');
+const marker = document.getElementById('textMarker');
+const textXInput = document.getElementById('textX');
+const textYInput = document.getElementById('textY');
+const overlayTextInput = document.getElementById('overlayTextInput');
+const textFontSelect = document.getElementById('textFont');
+const textSizeInput = document.getElementById('textSize');
+const textColorInput = document.getElementById('textColor');
+
+function setMarkerPosition(xRatio, yRatio) {
+  xRatio = Math.max(0, Math.min(1, xRatio));
+  yRatio = Math.max(0, Math.min(1, yRatio));
+  marker.style.left = (xRatio * 100) + '%';
+  marker.style.top = (yRatio * 100) + '%';
+  textXInput.value = xRatio.toFixed(3);
+  textYInput.value = yRatio.toFixed(3);
+}
+
+function updateMarkerStyle() {
+  marker.textContent = overlayTextInput.value || 'ここにテキスト';
+  marker.style.color = textColorInput.value;
+  marker.style.fontFamily = textFontSelect.value === 'mincho'
+    ? '"Hiragino Mincho ProN", "Yu Mincho", serif'
+    : '"Hiragino Kaku Gothic ProN", "Yu Gothic", sans-serif';
+
+  const naturalWidth = previewImage.naturalWidth || previewWrap.clientWidth;
+  const scale = previewWrap.clientWidth / naturalWidth;
+  const fontSize = Math.max(6, (parseFloat(textSizeInput.value) || 56) * scale);
+  marker.style.fontSize = fontSize + 'px';
+}
+
+[overlayTextInput, textFontSelect, textSizeInput, textColorInput].forEach(function (el) {
+  el.addEventListener('input', updateMarkerStyle);
+});
+if (previewImage.complete) {
+  updateMarkerStyle();
+} else {
+  previewImage.addEventListener('load', updateMarkerStyle);
+}
+
+function pointerToRatio(evt) {
+  const rect = previewWrap.getBoundingClientRect();
+  return {
+    x: (evt.clientX - rect.left) / rect.width,
+    y: (evt.clientY - rect.top) / rect.height,
+  };
+}
+
+let draggingMarker = false;
+marker.addEventListener('pointerdown', function (e) {
+  draggingMarker = true;
+  marker.setPointerCapture(e.pointerId);
+  e.preventDefault();
+});
+marker.addEventListener('pointermove', function (e) {
+  if (!draggingMarker) return;
+  const r = pointerToRatio(e);
+  setMarkerPosition(r.x, r.y);
+});
+marker.addEventListener('pointerup', function () {
+  draggingMarker = false;
+});
+previewWrap.addEventListener('click', function (e) {
+  if (e.target === marker) return;
+  const r = pointerToRatio(e);
+  setMarkerPosition(r.x, r.y);
+});
+
+document.querySelectorAll('#textPresetButtons button').forEach(function (btn) {
+  btn.addEventListener('click', function () {
+    document.querySelectorAll('#textPresetButtons button').forEach(function (b) { b.classList.remove('active'); });
+    btn.classList.add('active');
+    setMarkerPosition(parseFloat(btn.dataset.x), parseFloat(btn.dataset.y));
+  });
+});
+
+setMarkerPosition(0.5, 0.88);
 </script>
 {% endblock %}

@@ -141,6 +141,8 @@ def add_watermark(
 def add_text_overlay(
     img: Image.Image,
     text: str,
+    x: float | None = None,
+    y: float | None = None,
     position: str = "bottom",
     font: str = DEFAULT_FONT,
     font_path: str | Path | None = None,
@@ -151,6 +153,11 @@ def add_text_overlay(
     padding: int = 48,
 ) -> Image.Image:
     """画像にテキストを合成する。
+
+    x, y を指定すると、その座標(画像サイズに対する比率 0.0〜1.0)を
+    テキストブロックの中心として任意の位置に配置する(ドラッグ配置用)。
+    x, y を省略した場合は従来通り position("top"/"center"/"bottom")に従い、
+    画像全体の横幅を基準に中央揃えする。
 
     font_path未指定時はfont(フォント名: "gothic"/"mincho")に対応する
     同梱の日本語対応フォントを使う。PillowのImageFont.load_default()は
@@ -167,29 +174,43 @@ def add_text_overlay(
 
     max_width = base.width - 2 * padding
     lines = _wrap_text(text, pil_font, max_width, draw)
-    line_heights = [draw.textbbox((0, 0), line, font=pil_font)[3] for line in lines]
+    line_widths = []
+    line_heights = []
+    for line in lines:
+        bbox = draw.textbbox((0, 0), line, font=pil_font)
+        line_widths.append(bbox[2] - bbox[0])
+        line_heights.append(bbox[3])
+    block_width = max(line_widths) if line_widths else 0
     total_height = sum(line_heights) + (len(lines) - 1) * 10
 
-    if position == "top":
-        y = padding
-    elif position == "center":
-        y = (base.height - total_height) // 2
-    else:  # bottom
-        y = base.height - total_height - padding
+    free_placement = x is not None or y is not None
+    if free_placement:
+        center_x = base.width * (0.5 if x is None else max(0.0, min(1.0, x)))
+        center_y = base.height * (0.5 if y is None else max(0.0, min(1.0, y)))
+        block_left = center_x - block_width / 2
+        cursor_y = center_y - total_height / 2
+    else:
+        if position == "top":
+            cursor_y = padding
+        elif position == "center":
+            cursor_y = (base.height - total_height) // 2
+        else:  # bottom
+            cursor_y = base.height - total_height - padding
 
-    for line, h in zip(lines, line_heights):
-        bbox = draw.textbbox((0, 0), line, font=pil_font)
-        w = bbox[2] - bbox[0]
-        x = (base.width - w) // 2
+    for line, w, h in zip(lines, line_widths, line_heights):
+        if free_placement:
+            line_x = block_left + (block_width - w) / 2
+        else:
+            line_x = (base.width - w) / 2
         draw.text(
-            (x, y),
+            (line_x, cursor_y),
             line,
             font=pil_font,
             fill=color,
             stroke_width=stroke_width,
             stroke_fill=stroke_color,
         )
-        y += h + 10
+        cursor_y += h + 10
 
     return base
 

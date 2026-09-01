@@ -14,7 +14,6 @@ dependencies = [
 
 [project.optional-dependencies]
 bg-removal = ["rembg>=2.0", "onnxruntime>=1.16"]
-api = ["anthropic>=0.40"]
 dev = ["pytest>=8.0"]
 
 [project.scripts]

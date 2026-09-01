@@ -1,24 +1,19 @@
 """キャプション・ハッシュタグの作成支援。
 
 - 手入力向けの表示整形・パース処理
-- キャプション/ハッシュタグの下書きをAIで自動生成する処理。2つの方式を用意している。
+- Claude Code CLI(`claude -p`)をサブプロセスとして呼び出し、画像を見た上での
+  キャプション/ハッシュタグの下書きを自動生成する処理
 
-  1. Claude Code CLI(`claude -p`)をサブプロセスとして呼び出す方式(既定・優先)。
-     Anthropic APIキーは不要で、`claude` コマンドが既にログイン済み
-     (Claude Pro/Max/Team等のサブスクリプション、または `claude` に設定したAPIキー)
-     であればそのまま動作する。
-  2. Anthropic APIを直接呼ぶ方式(フォールバック)。`claude` コマンドが未インストール・
-     未ログインで使えない場合に、ANTHROPIC_API_KEYが設定されていれば自動的にこちらを使う。
-     claude.aiのプラン(Free/Pro/Max等)に関係なく、APIキーさえあれば誰でも利用できる。
-
-generate_caption() が上記2方式を自動的に使い分けるエントリーポイント。
+Anthropic APIキーへのフォールバックは行わない。`claude` コマンドはFreeプランでは
+利用できずPro以上の契約が必要なため、「Freeでも使えるように」という目的でAPIキーに
+フォールバックしても結局追加の有料契約が必須になり本末転倒になる。そのため
+`claude` コマンドが使えない場合は、呼び出し側(cli.py/webapp/routes.py)で
+そのまま手入力モードに切り替える。
 """
 
 from __future__ import annotations
 
-import base64
 import json
-import mimetypes
 import re
 import shutil
 import subprocess
@@ -80,12 +75,14 @@ def parse_hashtags(raw: str) -> list[str]:
     return tags
 
 
-def _build_prompt_rules(topic: str, hashtag_count: int, notes: str) -> str:
-    """CLI経由・API経由の両方で共通する指示文(画像の入手方法だけが異なる)。"""
+def _build_cli_prompt(topic: str, image_path: Path, hashtag_count: int, notes: str) -> str:
     topic_line = topic.strip() if topic.strip() else "(指定なし。画像の内容から適切なテーマを判断してください)"
     notes_line = notes.strip() if notes.strip() else "(特になし)"
 
-    return f"""その内容を踏まえて、Instagram投稿用のキャプションとハッシュタグを
+    return f"""あなたはInstagram運用を支援する、プロのSNSマーケター・コピーライターです。
+画像 {image_path} を読み込んでください。
+
+その内容を踏まえて、Instagram投稿用のキャプションとハッシュタグを
 プロの品質で作成してください。
 
 # 投稿テーマ
@@ -108,22 +105,6 @@ def _build_prompt_rules(topic: str, hashtag_count: int, notes: str) -> str:
 {RESULT_MARKER_HASHTAGS}
 #tag1 #tag2 #tag3 ...
 """
-
-
-def _build_cli_prompt(topic: str, image_path: Path, hashtag_count: int, notes: str) -> str:
-    return (
-        f"あなたはInstagram運用を支援する、プロのSNSマーケター・コピーライターです。\n"
-        f"画像 {image_path} を読み込んでください。\n\n"
-        + _build_prompt_rules(topic, hashtag_count, notes)
-    )
-
-
-def _build_api_prompt(topic: str, hashtag_count: int, notes: str) -> str:
-    return (
-        "あなたはInstagram運用を支援する、プロのSNSマーケター・コピーライターです。\n"
-        "添付されている画像を確認してください。\n\n"
-        + _build_prompt_rules(topic, hashtag_count, notes)
-    )
 
 
 def _parse_ai_response(text: str) -> dict[str, str | list[str]]:
@@ -150,8 +131,10 @@ def generate_caption_via_cli(
 ) -> dict[str, str | list[str]]:
     """Claude Code CLI(`claude -p`)を使い、画像を見た上でのキャプション/ハッシュタグ案を生成する。
 
-    Anthropic APIキーは不要。`claude` コマンドが既にログイン済み
-    (Claude Pro/Max等のサブスクリプション、またはAPIキー)であればそのまま動作する。
+    `claude` コマンドが既にログイン済み(Claude Pro/Max/Team等のサブスクリプション、
+    または `claude` に設定したAPIキー)であれば動作する。`claude` コマンドはFreeプランでは
+    利用できないため、Freeプランのユーザーはこの機能を使えない
+    (Anthropic APIキーへのフォールバックは行わない。呼び出し側で手入力に切り替えること)。
     """
     command = command or config.CLAUDE_CLI_COMMAND
     timeout = config.CLAUDE_CLI_TIMEOUT if timeout is None else timeout
@@ -160,7 +143,8 @@ def generate_caption_via_cli(
         raise CaptionGenerationError(
             f"Claude Code CLI ('{command}') が見つかりません。"
             " https://claude.com/claude-code からインストールし、"
-            "`claude` コマンドでログイン済みであることを確認してください。"
+            "`claude` コマンドでログイン済みであることを確認してください"
+            "(Proプラン以上が必要です)。"
         )
 
     image_path = Path(image_path)
@@ -208,112 +192,3 @@ def generate_caption_via_cli(
         raise CaptionGenerationError("Claude Code CLIから空の応答が返されました。")
 
     return _parse_ai_response(result_text)
-
-
-def generate_caption_via_api(
-    topic: str,
-    image_path: Path,
-    hashtag_count: int = 10,
-    notes: str = "",
-    api_key: str | None = None,
-    model: str | None = None,
-) -> dict[str, str | list[str]]:
-    """Anthropic APIを直接呼び出してキャプション/ハッシュタグ案を生成する(フォールバック用)。
-
-    `claude` コマンドの有無・ログイン状態に関係なく、ANTHROPIC_API_KEYさえあれば動作する。
-    """
-    try:
-        import anthropic
-    except ImportError as exc:
-        raise CaptionGenerationError(
-            "Anthropic API連携には追加パッケージが必要です: pip install anthropic"
-        ) from exc
-
-    api_key = api_key or config.ANTHROPIC_API_KEY
-    if not api_key:
-        raise CaptionGenerationError(
-            "ANTHROPIC_API_KEYが設定されていません。.envに設定するか、"
-            "Claude Code CLI(`claude login`)を使う方法もあります。"
-        )
-
-    image_path = Path(image_path)
-    if not image_path.exists():
-        raise CaptionGenerationError(f"画像が見つかりません: {image_path}")
-
-    media_type = mimetypes.guess_type(str(image_path))[0] or "image/jpeg"
-    image_data = base64.standard_b64encode(image_path.read_bytes()).decode("ascii")
-    prompt = _build_api_prompt(topic, hashtag_count, notes)
-
-    client = anthropic.Anthropic(api_key=api_key)
-    try:
-        response = client.messages.create(
-            model=model or config.ANTHROPIC_MODEL,
-            max_tokens=1024,
-            messages=[
-                {
-                    "role": "user",
-                    "content": [
-                        {
-                            "type": "image",
-                            "source": {
-                                "type": "base64",
-                                "media_type": media_type,
-                                "data": image_data,
-                            },
-                        },
-                        {"type": "text", "text": prompt},
-                    ],
-                }
-            ],
-        )
-    except anthropic.AuthenticationError as exc:
-        raise CaptionGenerationError("ANTHROPIC_API_KEYが無効です。") from exc
-    except anthropic.APIConnectionError as exc:
-        raise CaptionGenerationError(
-            "Anthropic APIに接続できませんでした。ネットワーク環境を確認してください。"
-        ) from exc
-    except anthropic.APIStatusError as exc:
-        raise CaptionGenerationError(f"Anthropic APIでエラーが発生しました: {exc}") from exc
-
-    result_text = "\n".join(
-        block.text for block in response.content if getattr(block, "type", "") == "text"
-    )
-    if not result_text.strip():
-        raise CaptionGenerationError("Anthropic APIから空の応答が返されました。")
-
-    return _parse_ai_response(result_text)
-
-
-def generate_caption(
-    topic: str,
-    image_path: Path,
-    hashtag_count: int = 10,
-    notes: str = "",
-) -> dict[str, str | list[str]]:
-    """Claude Code CLIを優先して使い、使えない場合はAnthropic APIキーにフォールバックする。
-
-    どちらの方式で生成しても、返るキャプション/ハッシュタグの形式は同じ。
-    claude.aiのプラン(Free/Pro/Max等)に依らず、`claude` コマンドがログイン済みか、
-    ANTHROPIC_API_KEYが設定されていればいずれかの方式で生成できる。
-    """
-    try:
-        return generate_caption_via_cli(
-            topic, image_path, hashtag_count=hashtag_count, notes=notes
-        )
-    except CaptionGenerationError as cli_error:
-        if not config.ANTHROPIC_API_KEY:
-            raise CaptionGenerationError(
-                f"{cli_error} また、ANTHROPIC_API_KEYも未設定のため、Anthropic API経由の"
-                "生成もできません。`claude login`でログインするか、.envにANTHROPIC_API_KEYを"
-                "設定してください(pip install anthropicが必要です)。"
-            ) from cli_error
-
-        try:
-            return generate_caption_via_api(
-                topic, image_path, hashtag_count=hashtag_count, notes=notes
-            )
-        except CaptionGenerationError as api_error:
-            raise CaptionGenerationError(
-                f"Claude Code CLIでの生成に失敗し({cli_error})、"
-                f"Anthropic API経由の生成にも失敗しました({api_error})。"
-            ) from api_error
