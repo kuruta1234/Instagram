@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import io
+import zipfile
 from pathlib import Path
 
 from . import config, storage
@@ -25,3 +27,17 @@ def export_post(post: Post) -> Path:
     (export_dir / "caption.txt").write_text(caption_text, encoding="utf-8")
 
     return export_dir
+
+
+def build_export_zip(post: Post) -> tuple[io.BytesIO, str]:
+    """エクスポート済みディレクトリの内容をZIPにまとめ、ブラウザダウンロード用に返す。"""
+    export_dir = export_post(post)
+
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as zf:
+        for path in sorted(export_dir.iterdir()):
+            if path.is_file():
+                zf.write(path, arcname=path.name)
+    buffer.seek(0)
+
+    return buffer, f"{post.id}.zip"

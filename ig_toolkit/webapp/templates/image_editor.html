@@ -67,6 +67,14 @@
     </div>
 
     <div class="op-section">
+      <h3>イラスト化</h3>
+      <p class="help-text">色数を落とし輪郭線を重ねて、写真をイラスト風に変換します。</p>
+      <form method="post" action="{{ url_for('igtool.apply_illustrate', post_id=post.id, index=index) }}">
+        <button type="submit" class="btn">画像をイラスト化</button>
+      </form>
+    </div>
+
+    <div class="op-section">
       <h3>背景除去</h3>
       <p class="help-text">初回は要 <code>pip install rembg onnxruntime</code>。処理に少し時間がかかります。</p>
       <form method="post" action="{{ url_for('igtool.apply_bg_remove', post_id=post.id, index=index) }}">
@@ -93,11 +101,34 @@
       <h3>テキストを追加</h3>
       <form class="stacked" method="post" action="{{ url_for('igtool.apply_text', post_id=post.id, index=index) }}">
         <input type="text" name="overlay_text" placeholder="画像に合成するテキスト" required>
-        <select name="text_position">
+
+        <label for="textPosition">位置</label>
+        <select name="text_position" id="textPosition">
           {% for pos in text_positions %}
           <option value="{{ pos }}">{{ pos }}</option>
           {% endfor %}
         </select>
+
+        <label for="textFont">フォント</label>
+        <select name="text_font" id="textFont">
+          {% for name in fonts %}
+          <option value="{{ name }}" {{ 'selected' if name == default_font }}>
+            {{ 'ゴシック体' if name == 'gothic' else '明朝体' if name == 'mincho' else name }}
+          </option>
+          {% endfor %}
+        </select>
+
+        <div style="display:flex; gap:12px; margin-top:10px; align-items:flex-end;">
+          <div style="flex:1;">
+            <label for="textSize">サイズ(px)</label>
+            <input type="number" name="text_size" id="textSize" value="56" min="8" max="300">
+          </div>
+          <div>
+            <label for="textColor">色</label>
+            <input type="color" name="text_color" id="textColor" value="#ffffff">
+          </div>
+        </div>
+
         <div class="btn-row">
           <button type="submit" class="btn">テキストを追加</button>
         </div>

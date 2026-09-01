@@ -22,7 +22,7 @@ from rich.console import Console
 from rich.table import Table
 
 from . import config, edit_ops, export_ops, image_edit, storage
-from .caption import CaptionGenerationError, format_context_for_input, generate_caption_via_cli, parse_hashtags
+from .caption import CaptionGenerationError, format_context_for_input, generate_caption, parse_hashtags
 from .models import Post, PostStatus
 
 console = Console()
@@ -132,7 +132,7 @@ def caption(
     if caption_text is None and hashtags_raw is None and not manual:
         console.print(f"画像を確認してキャプションを生成しています... ({image_path.name})")
         try:
-            result = generate_caption_via_cli(
+            result = generate_caption(
                 topic=post.topic, image_path=image_path, hashtag_count=hashtag_count, notes=notes
             )
         except CaptionGenerationError as exc:
@@ -195,6 +195,18 @@ def caption(
     default="bottom",
     show_default=True,
 )
+@click.option(
+    "--text-font",
+    type=click.Choice(list(image_edit.FONTS)),
+    default=image_edit.DEFAULT_FONT,
+    show_default=True,
+    help="テキスト合成に使うフォント",
+)
+@click.option("--text-size", default=56, show_default=True, help="テキストのフォントサイズ(px)")
+@click.option(
+    "--text-color", default="#ffffff", show_default=True, help="テキストの色(#rrggbb形式)"
+)
+@click.option("--illustrate", is_flag=True, help="写真をイラスト風(減色+輪郭線)に変換する")
 def edit(
     post_id: str,
     image_index: int,
@@ -205,6 +217,10 @@ def edit(
     watermark_position: str,
     text: str | None,
     text_position: str,
+    text_font: str,
+    text_size: int,
+    text_color: str,
+    illustrate: bool,
 ) -> None:
     """画像を編集する(中央固定のクロップ。任意範囲を選びたい場合はGUIを使用)。"""
     post = _load_or_fail(post_id)
@@ -220,6 +236,9 @@ def edit(
     if enhance:
         img = image_edit.auto_enhance(img)
         applied.append("enhance")
+    if illustrate:
+        img = image_edit.illustrate(img)
+        applied.append("illustrate")
     if bg_remove:
         try:
             img = image_edit.remove_background(img)
@@ -230,11 +249,18 @@ def edit(
         img = image_edit.add_watermark(img, watermark, position=watermark_position)
         applied.append("watermark")
     if text:
-        img = image_edit.add_text_overlay(img, text, position=text_position)
+        img = image_edit.add_text_overlay(
+            img,
+            text,
+            position=text_position,
+            font=text_font,
+            font_size=text_size,
+            color=image_edit.parse_hex_color(text_color),
+        )
         applied.append("text")
 
     if not applied:
-        console.print("[yellow]編集オプションが指定されていません。--preset/--enhance/--bg-remove/--watermark/--text のいずれかを指定してください。[/yellow]")
+        console.print("[yellow]編集オプションが指定されていません。--preset/--enhance/--bg-remove/--illustrate/--watermark/--text のいずれかを指定してください。[/yellow]")
         return
 
     edit_ops.save_edited(post, asset, img, applied)

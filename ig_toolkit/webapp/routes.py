@@ -18,7 +18,7 @@ from flask import (
 from werkzeug.utils import secure_filename
 
 from .. import edit_ops, export_ops, image_edit, storage
-from ..caption import CaptionGenerationError, describe_image, generate_caption_via_cli, parse_hashtags
+from ..caption import CaptionGenerationError, describe_image, generate_caption, parse_hashtags
 from ..models import Post, PostStatus
 
 bp = Blueprint("igtool", __name__)
@@ -131,7 +131,7 @@ def post_caption_generate(post_id: str):
     notes = request.form.get("notes", "")
 
     try:
-        result = generate_caption_via_cli(topic=post.topic, image_path=image_path, notes=notes)
+        result = generate_caption(topic=post.topic, image_path=image_path, notes=notes)
     except CaptionGenerationError as exc:
         flash(str(exc), "error")
         return redirect(url_for("igtool.post_detail", post_id=post_id))
@@ -171,6 +171,8 @@ def image_editor(post_id: str, index: int):
         presets=image_edit.PRESETS,
         watermark_positions=WATERMARK_POSITIONS,
         text_positions=TEXT_POSITIONS,
+        fonts=image_edit.FONTS,
+        default_font=image_edit.DEFAULT_FONT,
     )
 
 
@@ -286,16 +288,42 @@ def apply_text(post_id: str, index: int):
 
     text = request.form.get("overlay_text", "").strip()
     position = request.form.get("text_position", "bottom")
+    font = request.form.get("text_font", image_edit.DEFAULT_FONT)
+    if font not in image_edit.FONTS:
+        font = image_edit.DEFAULT_FONT
+    try:
+        font_size = int(request.form.get("text_size", "56"))
+    except ValueError:
+        font_size = 56
+    font_size = max(8, min(font_size, 300))
+    color = image_edit.parse_hex_color(request.form.get("text_color", "#ffffff"))
+
     if not text:
         flash("画像に合成するテキストを入力してください", "error")
         return redirect(url_for("igtool.image_editor", post_id=post_id, index=index))
 
     asset, img = edit_ops.load_current_image(post, index)
-    result = image_edit.add_text_overlay(img, text, position=position)
+    result = image_edit.add_text_overlay(
+        img, text, position=position, font=font, font_size=font_size, color=color
+    )
     edit_ops.save_edited(post, asset, result, ["text"])
     storage.save(post)
 
     flash("テキストを追加しました", "success")
+    return redirect(url_for("igtool.image_editor", post_id=post_id, index=index))
+
+
+@bp.route("/posts/<post_id>/edit/<int:index>/illustrate", methods=["POST"])
+def apply_illustrate(post_id: str, index: int):
+    post = _get_post_or_404(post_id)
+    _image_index_or_404(post, index)
+
+    asset, img = edit_ops.load_current_image(post, index)
+    result = image_edit.illustrate(img)
+    edit_ops.save_edited(post, asset, result, ["illustrate"])
+    storage.save(post)
+
+    flash("イラスト風に変換しました", "success")
     return redirect(url_for("igtool.image_editor", post_id=post_id, index=index))
 
 
@@ -315,9 +343,13 @@ def reset_image(post_id: str, index: int):
 @bp.route("/posts/<post_id>/export", methods=["POST"])
 def post_export(post_id: str):
     post = _get_post_or_404(post_id)
-    export_dir = export_ops.export_post(post)
-    flash(f"エクスポートしました: {export_dir}", "success")
-    return redirect(url_for("igtool.post_detail", post_id=post_id))
+    buffer, filename = export_ops.build_export_zip(post)
+    return send_file(
+        buffer,
+        mimetype="application/zip",
+        as_attachment=True,
+        download_name=filename,
+    )
 
 
 @bp.route("/posts/<post_id>/mark-posted", methods=["POST"])

@@ -1,6 +1,6 @@
 import json
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 from PIL import Image
@@ -10,6 +10,8 @@ from ig_toolkit.caption import (
     _parse_ai_response,
     describe_image,
     format_context_for_input,
+    generate_caption,
+    generate_caption_via_api,
     generate_caption_via_cli,
     parse_hashtags,
 )
@@ -143,3 +145,102 @@ def test_generate_caption_via_cli_is_error_response(tmp_path):
     ):
         with pytest.raises(CaptionGenerationError, match="エラーを返しました"):
             generate_caption_via_cli(topic="テスト", image_path=img_path)
+
+
+# --- Anthropic APIフォールバック(generate_caption_via_api) ---
+
+
+def test_generate_caption_via_api_success(tmp_path):
+    img_path = tmp_path / "sample.jpg"
+    Image.new("RGB", (100, 100)).save(img_path)
+
+    text_block = MagicMock()
+    text_block.type = "text"
+    text_block.text = "【キャプション】\nAPIキャプション\n\n【ハッシュタグ】\n#x #y"
+    mock_response = MagicMock()
+    mock_response.content = [text_block]
+    mock_client = MagicMock()
+    mock_client.messages.create.return_value = mock_response
+
+    with patch("anthropic.Anthropic", return_value=mock_client):
+        result = generate_caption_via_api(topic="テスト", image_path=img_path, api_key="sk-test")
+
+    assert result["caption"] == "APIキャプション"
+    assert result["hashtags"] == ["#x", "#y"]
+    mock_client.messages.create.assert_called_once()
+
+
+def test_generate_caption_via_api_missing_key(tmp_path):
+    img_path = tmp_path / "sample.jpg"
+    Image.new("RGB", (100, 100)).save(img_path)
+
+    with patch("ig_toolkit.config.ANTHROPIC_API_KEY", None):
+        with pytest.raises(CaptionGenerationError, match="ANTHROPIC_API_KEY"):
+            generate_caption_via_api(topic="テスト", image_path=img_path)
+
+
+def test_generate_caption_via_api_missing_image():
+    with pytest.raises(CaptionGenerationError, match="画像が見つかりません"):
+        generate_caption_via_api(topic="テスト", image_path=Path("/no/such/file.jpg"), api_key="sk-test")
+
+
+# --- generate_caption(): CLI優先+APIフォールバックの統合ロジック ---
+
+
+def test_generate_caption_prefers_cli_and_skips_api(tmp_path):
+    img_path = tmp_path / "sample.jpg"
+    Image.new("RGB", (100, 100)).save(img_path)
+
+    with patch(
+        "ig_toolkit.caption.generate_caption_via_cli",
+        return_value={"caption": "cli-caption", "hashtags": ["#a"]},
+    ) as cli_mock, patch("ig_toolkit.caption.generate_caption_via_api") as api_mock:
+        result = generate_caption(topic="t", image_path=img_path)
+
+    assert result["caption"] == "cli-caption"
+    cli_mock.assert_called_once()
+    api_mock.assert_not_called()
+
+
+def test_generate_caption_falls_back_to_api_when_cli_fails(tmp_path):
+    img_path = tmp_path / "sample.jpg"
+    Image.new("RGB", (100, 100)).save(img_path)
+
+    with patch(
+        "ig_toolkit.caption.generate_caption_via_cli",
+        side_effect=CaptionGenerationError("cli not found"),
+    ), patch("ig_toolkit.caption.config.ANTHROPIC_API_KEY", "sk-test"), patch(
+        "ig_toolkit.caption.generate_caption_via_api",
+        return_value={"caption": "api-caption", "hashtags": ["#b"]},
+    ) as api_mock:
+        result = generate_caption(topic="t", image_path=img_path)
+
+    assert result["caption"] == "api-caption"
+    api_mock.assert_called_once()
+
+
+def test_generate_caption_raises_when_both_unavailable(tmp_path):
+    img_path = tmp_path / "sample.jpg"
+    Image.new("RGB", (100, 100)).save(img_path)
+
+    with patch(
+        "ig_toolkit.caption.generate_caption_via_cli",
+        side_effect=CaptionGenerationError("cli not found"),
+    ), patch("ig_toolkit.caption.config.ANTHROPIC_API_KEY", None):
+        with pytest.raises(CaptionGenerationError, match="ANTHROPIC_API_KEY"):
+            generate_caption(topic="t", image_path=img_path)
+
+
+def test_generate_caption_raises_combined_error_when_both_fail(tmp_path):
+    img_path = tmp_path / "sample.jpg"
+    Image.new("RGB", (100, 100)).save(img_path)
+
+    with patch(
+        "ig_toolkit.caption.generate_caption_via_cli",
+        side_effect=CaptionGenerationError("cli fail"),
+    ), patch("ig_toolkit.caption.config.ANTHROPIC_API_KEY", "sk-test"), patch(
+        "ig_toolkit.caption.generate_caption_via_api",
+        side_effect=CaptionGenerationError("api fail"),
+    ):
+        with pytest.raises(CaptionGenerationError, match="失敗しました"):
+            generate_caption(topic="t", image_path=img_path)

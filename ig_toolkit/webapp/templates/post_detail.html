@@ -43,10 +43,10 @@
 
 <h2>エクスポート・投稿</h2>
 <div class="card">
-  <p class="help-text">自動投稿は行いません。画像とキャプションをエクスポートし、Instagramアプリから手動で投稿してください。</p>
+  <p class="help-text">自動投稿は行いません。画像とキャプションをZIPでダウンロードし、Instagramアプリから手動で投稿してください。</p>
   <div class="btn-row">
     <form class="inline-form" method="post" action="{{ url_for('igtool.post_export', post_id=post.id) }}">
-      <button type="submit" class="btn">エクスポート</button>
+      <button type="submit" class="btn">画像+キャプションをダウンロード(ZIP)</button>
     </form>
     <form class="inline-form" method="post" action="{{ url_for('igtool.post_mark_posted', post_id=post.id) }}">
       <button type="submit" class="btn">投稿済みにする</button>

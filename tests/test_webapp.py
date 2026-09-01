@@ -111,9 +111,20 @@ def test_full_lifecycle_via_web(isolated_data_dir):
     post = storage.load(post_id)
     assert post.images[0].edited is None
 
-    # エクスポート
+    # エクスポート(画像+キャプションをZIPでダウンロード)
     resp = client.post(f"/posts/{post_id}/export")
-    assert resp.status_code == 302
+    assert resp.status_code == 200
+    assert resp.mimetype == "application/zip"
+    assert resp.headers["Content-Disposition"].startswith("attachment")
+    assert len(resp.data) > 0
+
+    import zipfile
+    from io import BytesIO
+
+    with zipfile.ZipFile(BytesIO(resp.data)) as zf:
+        names = zf.namelist()
+        assert "caption.txt" in names
+        assert any(n.endswith((".jpg", ".jpeg", ".png")) for n in names)
 
     from ig_toolkit import config
 

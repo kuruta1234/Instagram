@@ -1,10 +1,10 @@
-"""画像編集処理: リサイズ/トリミング/自動補正/背景除去/透かし/テキスト合成/サイズ検証。"""
+"""画像編集処理: リサイズ/トリミング/自動補正/背景除去/透かし/テキスト合成/イラスト化/サイズ検証。"""
 
 from __future__ import annotations
 
 from pathlib import Path
 
-from PIL import Image, ImageDraw, ImageEnhance, ImageFont, ImageOps
+from PIL import Image, ImageDraw, ImageEnhance, ImageFilter, ImageFont, ImageOps
 
 # Instagram推奨サイズ(長辺1080px基準)
 PRESETS: dict[str, tuple[int, int]] = {
@@ -17,6 +17,27 @@ PRESETS: dict[str, tuple[int, int]] = {
 MIN_RATIO = 0.8  # 4:5
 MAX_RATIO = 1.91  # 1.91:1
 MIN_LONG_EDGE = 320
+
+# テキスト合成用に同梱している日本語対応フォント。
+# PillowのImageFont.load_default()は日本語グリフを持たないため、
+# 既定では必ずこちらを使う(文字化け/豆腐対策)。
+FONTS_DIR = Path(__file__).resolve().parent / "assets" / "fonts"
+FONTS: dict[str, Path] = {
+    "gothic": FONTS_DIR / "IPAGothic.ttf",
+    "mincho": FONTS_DIR / "IPAMincho.ttf",
+}
+DEFAULT_FONT = "gothic"
+
+
+def parse_hex_color(value: str, default: tuple[int, int, int] = (255, 255, 255)) -> tuple[int, int, int]:
+    """"#rrggbb" 形式の文字列をRGBタプルに変換する(パース不能時はdefaultを返す)。"""
+    value = (value or "").strip().lstrip("#")
+    if len(value) != 6:
+        return default
+    try:
+        return (int(value[0:2], 16), int(value[2:4], 16), int(value[4:6], 16))
+    except ValueError:
+        return default
 
 
 def load_image(path: Path) -> Image.Image:
@@ -121,26 +142,32 @@ def add_text_overlay(
     img: Image.Image,
     text: str,
     position: str = "bottom",
-    font_path: str | None = None,
+    font: str = DEFAULT_FONT,
+    font_path: str | Path | None = None,
     font_size: int = 56,
     color: tuple[int, int, int] = (255, 255, 255),
     stroke_color: tuple[int, int, int] = (0, 0, 0),
     stroke_width: int = 3,
     padding: int = 48,
 ) -> Image.Image:
+    """画像にテキストを合成する。
+
+    font_path未指定時はfont(フォント名: "gothic"/"mincho")に対応する
+    同梱の日本語対応フォントを使う。PillowのImageFont.load_default()は
+    日本語グリフを含まず文字化けするため、フォールバックとしても使わない。
+    """
     base = img.convert("RGBA")
     draw = ImageDraw.Draw(base)
 
+    resolved_path = Path(font_path) if font_path else FONTS.get(font, FONTS[DEFAULT_FONT])
     try:
-        font = ImageFont.truetype(font_path, font_size) if font_path else ImageFont.load_default(
-            size=font_size
-        )
-    except (OSError, TypeError):
-        font = ImageFont.load_default()
+        pil_font = ImageFont.truetype(str(resolved_path), font_size)
+    except OSError as exc:
+        raise ValueError(f"フォントを読み込めませんでした: {resolved_path}") from exc
 
     max_width = base.width - 2 * padding
-    lines = _wrap_text(text, font, max_width, draw)
-    line_heights = [draw.textbbox((0, 0), line, font=font)[3] for line in lines]
+    lines = _wrap_text(text, pil_font, max_width, draw)
+    line_heights = [draw.textbbox((0, 0), line, font=pil_font)[3] for line in lines]
     total_height = sum(line_heights) + (len(lines) - 1) * 10
 
     if position == "top":
@@ -151,13 +178,13 @@ def add_text_overlay(
         y = base.height - total_height - padding
 
     for line, h in zip(lines, line_heights):
-        bbox = draw.textbbox((0, 0), line, font=font)
+        bbox = draw.textbbox((0, 0), line, font=pil_font)
         w = bbox[2] - bbox[0]
         x = (base.width - w) // 2
         draw.text(
             (x, y),
             line,
-            font=font,
+            font=pil_font,
             fill=color,
             stroke_width=stroke_width,
             stroke_fill=stroke_color,
@@ -181,6 +208,37 @@ def _wrap_text(text: str, font, max_width: int, draw: ImageDraw.ImageDraw) -> li
                 current = trial
         lines.append(current)
     return lines
+
+
+def illustrate(img: Image.Image, colors: int = 18, edge_strength: int = 60) -> Image.Image:
+    """写真を色数を落としたフラットな配色+黒い輪郭線の「イラスト風」に変換する。
+
+    OpenCV等の追加インストールなしで動作するよう、Pillow標準機能のみで実装した
+    簡易カートゥーン化(減色+輪郭線抽出)。colorsで配色の数(少ないほどフラットに)、
+    edge_strengthで輪郭線の出やすさ(大きいほど線が増える)を調整できる。
+    """
+    rgb = img.convert("RGB")
+
+    # 1. 細部・ノイズを平滑化してベタ塗りに近づける
+    smooth = rgb
+    for _ in range(3):
+        smooth = smooth.filter(ImageFilter.SMOOTH_MORE)
+
+    # 2. 減色してポスター風のフラットな配色にする
+    quantized = smooth.quantize(colors=max(4, colors), method=Image.MEDIANCUT).convert("RGB")
+
+    # 3. 輪郭線を抽出し、閾値処理して「線画」を作る
+    gray = rgb.convert("L").filter(ImageFilter.MedianFilter(size=9))
+    edges = gray.filter(ImageFilter.FIND_EDGES)
+    edges = ImageOps.autocontrast(edges, cutoff=1)
+    line_mask = edges.point(lambda p: 255 if p > (255 - edge_strength) else 0)
+    line_mask = line_mask.filter(ImageFilter.MaxFilter(3))
+
+    # 4. 配色の上に輪郭線を重ねて完成
+    result = quantized.copy()
+    ink = Image.new("RGB", result.size, (25, 22, 20))
+    result.paste(ink, mask=line_mask)
+    return result
 
 
 def validate_instagram_size(img: Image.Image) -> list[str]:
