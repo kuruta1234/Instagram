@@ -1,0 +1,178 @@
+{% extends "base.html" %}
+{% block title %}画像編集 - {{ post.topic }}{% endblock %}
+{% block head %}
+<link rel="stylesheet" href="{{ url_for('static', filename='vendor/cropperjs/cropper.min.css') }}">
+<script src="{{ url_for('static', filename='vendor/cropperjs/cropper.min.js') }}"></script>
+{% endblock %}
+{% block content %}
+<h1>画像を編集</h1>
+<p class="subtitle"><a href="{{ url_for('igtool.post_detail', post_id=post.id) }}">&laquo; {{ post.topic }} に戻る</a></p>
+
+{% set asset = post.images[index] %}
+<div class="editor-layout">
+  <div class="editor-canvas">
+    <img id="editorImage"
+         src="{{ url_for('igtool.serve_image', post_id=post.id, index=index, variant='current') }}?t={{ (post, index) | cache_bust }}"
+         alt="編集対象の画像">
+  </div>
+
+  <div class="editor-controls">
+    <h3>トリミング(任意の範囲を選択)</h3>
+    <p class="help-text">画像上をドラッグして切り抜く範囲を自由に選べます。マウスホイールやズームスライダーで拡大・縮小、ハンドルをドラッグして範囲を調整できます。</p>
+
+    <div class="aspect-buttons" id="aspectButtons">
+      <button type="button" data-ratio="free" class="active">自由</button>
+      <button type="button" data-ratio="1">1:1</button>
+      <button type="button" data-ratio="0.8">4:5</button>
+      <button type="button" data-ratio="1.91">1.91:1</button>
+      <button type="button" data-ratio="0.5625">9:16</button>
+    </div>
+
+    <label for="zoomRange">ズーム</label>
+    <input type="range" id="zoomRange" min="-1" max="2" step="0.05" value="0" style="width:100%">
+
+    <div class="btn-row">
+      <button type="button" id="resetCropBtn" class="btn">選択をリセット</button>
+    </div>
+
+    <form class="stacked" method="post" action="{{ url_for('igtool.apply_crop', post_id=post.id, index=index) }}" id="cropForm">
+      <input type="hidden" name="crop_x" id="cropX">
+      <input type="hidden" name="crop_y" id="cropY">
+      <input type="hidden" name="crop_width" id="cropWidth">
+      <input type="hidden" name="crop_height" id="cropHeight">
+
+      <label for="resizePreset">出力サイズ</label>
+      <select name="resize_preset" id="resizePreset">
+        <option value="">切り抜いたサイズのまま</option>
+        {% for name, size in presets.items() %}
+        <option value="{{ name }}">{{ name }}({{ size[0] }}x{{ size[1] }})</option>
+        {% endfor %}
+        <option value="custom">カスタムサイズ</option>
+      </select>
+      <div id="customSizeInputs" hidden style="display:flex; gap:8px; margin-top:8px;">
+        <input type="number" name="resize_width" placeholder="幅px" min="1">
+        <input type="number" name="resize_height" placeholder="高さpx" min="1">
+      </div>
+
+      <div class="btn-row">
+        <button type="submit" class="btn btn-primary">トリミングを適用</button>
+      </div>
+    </form>
+
+    <div class="op-section">
+      <h3>自動補正</h3>
+      <form method="post" action="{{ url_for('igtool.apply_enhance', post_id=post.id, index=index) }}">
+        <button type="submit" class="btn">明るさ・彩度・シャープネスを自動補正</button>
+      </form>
+    </div>
+
+    <div class="op-section">
+      <h3>背景除去</h3>
+      <p class="help-text">初回は要 <code>pip install rembg onnxruntime</code>。処理に少し時間がかかります。</p>
+      <form method="post" action="{{ url_for('igtool.apply_bg_remove', post_id=post.id, index=index) }}">
+        <button type="submit" class="btn">背景を除去する</button>
+      </form>
+    </div>
+
+    <div class="op-section">
+      <h3>透かし(ロゴ)を追加</h3>
+      <form class="stacked" method="post" enctype="multipart/form-data" action="{{ url_for('igtool.apply_watermark', post_id=post.id, index=index) }}">
+        <input type="file" name="watermark_file" accept="image/*" required>
+        <select name="watermark_position">
+          {% for pos in watermark_positions %}
+          <option value="{{ pos }}">{{ pos }}</option>
+          {% endfor %}
+        </select>
+        <div class="btn-row">
+          <button type="submit" class="btn">透かしを追加</button>
+        </div>
+      </form>
+    </div>
+
+    <div class="op-section">
+      <h3>テキストを追加</h3>
+      <form class="stacked" method="post" action="{{ url_for('igtool.apply_text', post_id=post.id, index=index) }}">
+        <input type="text" name="overlay_text" placeholder="画像に合成するテキスト" required>
+        <select name="text_position">
+          {% for pos in text_positions %}
+          <option value="{{ pos }}">{{ pos }}</option>
+          {% endfor %}
+        </select>
+        <div class="btn-row">
+          <button type="submit" class="btn">テキストを追加</button>
+        </div>
+      </form>
+    </div>
+
+    <div class="op-section">
+      <h3>元に戻す</h3>
+      <form method="post" action="{{ url_for('igtool.reset_image', post_id=post.id, index=index) }}" onsubmit="return confirm('編集内容を破棄して元画像に戻します。よろしいですか？');">
+        <button type="submit" class="btn btn-danger">元画像に戻す</button>
+      </form>
+      {% if asset.edits %}
+      <div class="edits-log">これまでの編集: {{ asset.edits | join(', ') }}</div>
+      {% endif %}
+    </div>
+  </div>
+</div>
+
+<script>
+const image = document.getElementById('editorImage');
+let cropper = null;
+
+image.addEventListener('ready', function () {}, false);
+
+function initCropper() {
+  cropper = new Cropper(image, {
+    viewMode: 1,
+    autoCropArea: 0.9,
+    zoomable: true,
+    movable: true,
+    scalable: false,
+    responsive: true,
+    background: false,
+    zoom: function (event) {
+      const ratio = (event.detail.ratio - 1).toFixed(2);
+      document.getElementById('zoomRange').value = ratio;
+    },
+  });
+}
+
+if (image.complete) {
+  initCropper();
+} else {
+  image.addEventListener('load', initCropper);
+}
+
+document.querySelectorAll('#aspectButtons button').forEach(function (btn) {
+  btn.addEventListener('click', function () {
+    document.querySelectorAll('#aspectButtons button').forEach(function (b) { b.classList.remove('active'); });
+    btn.classList.add('active');
+    const r = btn.dataset.ratio;
+    cropper.setAspectRatio(r === 'free' ? NaN : parseFloat(r));
+  });
+});
+
+document.getElementById('zoomRange').addEventListener('input', function (e) {
+  cropper.zoomTo(1 + parseFloat(e.target.value));
+});
+
+document.getElementById('resetCropBtn').addEventListener('click', function () {
+  cropper.reset();
+});
+
+document.getElementById('cropForm').addEventListener('submit', function () {
+  const data = cropper.getData(true);
+  document.getElementById('cropX').value = data.x;
+  document.getElementById('cropY').value = data.y;
+  document.getElementById('cropWidth').value = data.width;
+  document.getElementById('cropHeight').value = data.height;
+});
+
+const resizePreset = document.getElementById('resizePreset');
+const customInputs = document.getElementById('customSizeInputs');
+resizePreset.addEventListener('change', function () {
+  customInputs.hidden = resizePreset.value !== 'custom';
+});
+</script>
+{% endblock %}

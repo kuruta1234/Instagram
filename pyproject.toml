@@ -1,7 +1,7 @@
 [project]
 name = "ig-toolkit"
 version = "0.1.0"
-description = "Instagram投稿業務を効率化するローカルCLIツール(キャプション手入力・画像編集・下書き管理・承認フロー)"
+description = "Instagram投稿業務を効率化するローカルツール(GUI/CLI、キャプション手入力・画像編集・下書き管理・承認フロー)"
 requires-python = ">=3.10"
 dependencies = [
     "click>=8.1",
@@ -9,6 +9,7 @@ dependencies = [
     "PyYAML>=6.0",
     "python-dotenv>=1.0",
     "rich>=13.0",
+    "Flask>=3.0",
 ]
 
 [project.optional-dependencies]
@@ -17,6 +18,7 @@ dev = ["pytest>=8.0"]
 
 [project.scripts]
 igtool = "ig_toolkit.cli:main"
+igtool-gui = "ig_toolkit.webapp:main"
 
 [build-system]
 requires = ["setuptools>=68", "wheel"]
@@ -24,3 +26,10 @@ build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]
 include = ["ig_toolkit*"]
+
+[tool.setuptools.package-data]
+ig_toolkit = [
+    "webapp/templates/*.html",
+    "webapp/static/*.css",
+    "webapp/static/vendor/cropperjs/*",
+]

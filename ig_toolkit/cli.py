@@ -1,5 +1,7 @@
 """igtool: Instagram投稿業務を効率化するローカルCLI。
 
+GUIで操作したい場合は `igtool-gui` を実行するとブラウザで使えるWebアプリが起動する。
+
 主なコマンド:
     igtool new        投稿ドラフトを新規作成
     igtool list        投稿一覧を表示
@@ -23,7 +25,7 @@ import click
 from rich.console import Console
 from rich.table import Table
 
-from . import calendar_view, config, image_edit, review, storage
+from . import calendar_view, config, edit_ops, export_ops, image_edit, review, storage
 from .caption import format_context_for_input, parse_hashtags
 from .models import Post, PostStatus
 
@@ -165,14 +167,7 @@ def caption(post_id: str, caption_text: str | None, hashtags_raw: str | None) ->
             "ハッシュタグ(カンマ区切り、#は省略可)", default="", show_default=False
         )
 
-    post.caption = caption_text
-    post.hashtags = parse_hashtags(hashtags_raw)
-    # 内容が変わったのでチェック済みフラグはリセットする
-    post.checklist.caption_ok = False
-    post.checklist.hashtag_ok = False
-    post.checklist.ng_word_ok = False
-    if post.status == PostStatus.DRAFT:
-        post.status = PostStatus.IN_REVIEW
+    review.set_caption(post, caption_text, parse_hashtags(hashtags_raw))
     storage.save(post)
 
     console.print("[green]キャプションを保存しました[/green]")
@@ -217,10 +212,7 @@ def edit(
     if image_index >= len(post.images):
         raise click.ClickException(f"画像番号が範囲外です(0〜{len(post.images) - 1})")
 
-    asset = post.images[image_index]
-    current_rel = asset.edited or asset.original
-    src_path = storage.resolve_image_path(post.id, current_rel)
-    img = image_edit.load_image(src_path)
+    asset, img = edit_ops.load_current_image(post, image_index)
 
     applied: list[str] = []
     if preset:
@@ -246,13 +238,7 @@ def edit(
         console.print("[yellow]編集オプションが指定されていません。--preset/--enhance/--bg-remove/--watermark/--text のいずれかを指定してください。[/yellow]")
         return
 
-    dest_name = Path(asset.original).stem + "_edited" + Path(asset.original).suffix
-    dest_path = storage.edited_dir(post.id) / dest_name
-    image_edit.save_image(img, dest_path)
-
-    asset.edited = str(dest_path.relative_to(storage.post_dir(post.id)))
-    asset.edits.extend(applied)
-    post.checklist.image_ok = False
+    edit_ops.save_edited(post, asset, img, applied)
     storage.save(post)
 
     console.print(f"[green]編集しました:[/green] {asset.edited}  (適用: {', '.join(applied)})")
@@ -363,19 +349,7 @@ def export(post_id: str) -> None:
         ):
             return
 
-    export_dir = config.EXPORTS_DIR / post.id
-    export_dir.mkdir(parents=True, exist_ok=True)
-
-    for i, asset in enumerate(post.images, start=1):
-        rel = asset.edited or asset.original
-        src = storage.resolve_image_path(post.id, rel)
-        dest = export_dir / f"{i:02d}{src.suffix}"
-        dest.write_bytes(src.read_bytes())
-
-    caption_text = post.caption.strip()
-    if post.hashtags:
-        caption_text += "\n\n" + " ".join(post.hashtags)
-    (export_dir / "caption.txt").write_text(caption_text, encoding="utf-8")
+    export_dir = export_ops.export_post(post)
 
     console.print(f"[green]エクスポートしました:[/green] {export_dir}")
     console.print("画像とcaption.txtの内容をInstagramアプリにコピーして投稿してください。")

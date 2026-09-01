@@ -46,6 +46,18 @@ def run_auto_checks(post: Post) -> AutoCheckResult:
     return result
 
 
+def set_caption(post: Post, caption_text: str, hashtags: list[str]) -> Post:
+    """キャプション・ハッシュタグを設定する(CLI/Web共通)。内容が変わるためチェック済みフラグはリセットする。"""
+    post.caption = caption_text
+    post.hashtags = hashtags
+    post.checklist.caption_ok = False
+    post.checklist.hashtag_ok = False
+    post.checklist.ng_word_ok = False
+    if post.status == PostStatus.DRAFT:
+        post.status = PostStatus.IN_REVIEW
+    return post
+
+
 def approve(post: Post) -> Post:
     if not post.checklist.all_passed():
         raise ValueError("チェックリストが全て完了していません。approveできません。")

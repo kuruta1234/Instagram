@@ -3,6 +3,7 @@ Pillow>=10.0
 PyYAML>=6.0
 python-dotenv>=1.0
 rich>=13.0
+Flask>=3.0
 
 # 任意: 背景除去を使う場合は以下も追加でインストール
 # pip install rembg onnxruntime

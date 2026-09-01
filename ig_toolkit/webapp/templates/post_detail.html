@@ -1,0 +1,84 @@
+{% extends "base.html" %}
+{% block title %}{{ post.topic }} - ig-toolkit{% endblock %}
+{% block content %}
+<h1>{{ post.topic }} <span class="badge badge-{{ post.status.value }}">{{ post.status.value }}</span></h1>
+<p class="subtitle">{{ post.id }}</p>
+
+<div class="card">
+  <strong>キーワード:</strong> {{ post.keywords | join(', ') if post.keywords else '-' }}<br>
+  <strong>トーン:</strong> {{ post.tone }}<br>
+  <strong>予定日:</strong> {{ post.scheduled_date or '-' }}
+</div>
+
+<h2>画像</h2>
+<div class="image-grid">
+  {% for info in image_infos %}
+  <div class="image-tile">
+    <img src="{{ url_for('igtool.serve_image', post_id=post.id, index=info.index, variant='current') }}?t={{ (post, info.index) | cache_bust }}" alt="{{ post.topic }}">
+    <div class="tile-body">
+      <div class="desc">{{ info.description }}{% if info.asset.edited %} ・ 編集済み{% endif %}</div>
+      <a class="btn" href="{{ url_for('igtool.image_editor', post_id=post.id, index=info.index) }}">この画像を編集</a>
+    </div>
+  </div>
+  {% endfor %}
+</div>
+
+<h2>キャプション・ハッシュタグ</h2>
+<div class="card">
+<form class="stacked" method="post" action="{{ url_for('igtool.post_caption', post_id=post.id) }}">
+  <label for="caption_text">キャプション</label>
+  <textarea id="caption_text" name="caption_text" rows="5" placeholder="画像を見ながらキャプションを入力してください">{{ post.caption }}</textarea>
+
+  <label for="hashtags">ハッシュタグ(カンマ区切り、#は省略可)</label>
+  <input type="text" id="hashtags" name="hashtags" value="{{ post.hashtags | join(', ') }}" placeholder="例: 紅茶, 秋限定">
+
+  <div class="btn-row">
+    <button type="submit" class="btn btn-primary">保存する</button>
+  </div>
+</form>
+</div>
+
+<h2>投稿前チェック</h2>
+<div class="card">
+  <div class="checklist-grid">
+    <div class="checklist-item">画像OK: {{ '✅' if post.checklist.image_ok else '未' }}</div>
+    <div class="checklist-item">キャプションOK: {{ '✅' if post.checklist.caption_ok else '未' }}</div>
+    <div class="checklist-item">ハッシュタグOK: {{ '✅' if post.checklist.hashtag_ok else '未' }}</div>
+    <div class="checklist-item">権利関係OK: {{ '✅' if post.checklist.rights_ok else '未' }}</div>
+    <div class="checklist-item">NGワードOK: {{ '✅' if post.checklist.ng_word_ok else '未' }}</div>
+  </div>
+  <div class="btn-row">
+    <a class="btn btn-primary" href="{{ url_for('igtool.post_review', post_id=post.id) }}">チェックリストを開く</a>
+  </div>
+</div>
+
+<h2>スケジュール</h2>
+<div class="card">
+<form class="stacked" method="post" action="{{ url_for('igtool.post_schedule', post_id=post.id) }}">
+  <label for="date">投稿予定日</label>
+  <input type="date" id="date" name="date" value="{{ post.scheduled_date[:10] if post.scheduled_date else '' }}">
+  <label for="time">投稿予定時刻(任意)</label>
+  <input type="time" id="time" name="time">
+  <div class="help-text">承認済み(approved)の投稿のみ設定できます。</div>
+  <div class="btn-row">
+    <button type="submit" class="btn">予定日を設定</button>
+  </div>
+</form>
+</div>
+
+<h2>エクスポート・投稿</h2>
+<div class="card">
+  <p class="help-text">自動投稿は行いません。画像とキャプションをエクスポートし、Instagramアプリから手動で投稿してください。</p>
+  <div class="btn-row">
+    <form class="inline-form" method="post" action="{{ url_for('igtool.post_export', post_id=post.id) }}">
+      <button type="submit" class="btn">エクスポート</button>
+    </form>
+    <form class="inline-form" method="post" action="{{ url_for('igtool.post_mark_posted', post_id=post.id) }}">
+      <button type="submit" class="btn">投稿済みにする</button>
+    </form>
+    <form class="inline-form" method="post" action="{{ url_for('igtool.post_delete', post_id=post.id) }}" onsubmit="return confirm('この投稿を削除します。よろしいですか？');">
+      <button type="submit" class="btn btn-danger">削除</button>
+    </form>
+  </div>
+</div>
+{% endblock %}

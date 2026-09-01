@@ -1,0 +1,32 @@
+{% extends "base.html" %}
+{% block title %}カレンダー - ig-toolkit{% endblock %}
+{% block content %}
+<h1>投稿カレンダー</h1>
+
+<div class="calendar-nav">
+  <a class="btn" href="{{ url_for('igtool.calendar_page', year=prev_year, month=prev_month) }}">&laquo; 前月</a>
+  <strong>{{ year }}年{{ month }}月</strong>
+  <a class="btn" href="{{ url_for('igtool.calendar_page', year=next_year, month=next_month) }}">翌月 &raquo;</a>
+</div>
+
+<div class="calendar-grid">
+  {% for label in ['日', '月', '火', '水', '木', '金', '土'] %}
+  <div class="calendar-weekday">{{ label }}</div>
+  {% endfor %}
+
+  {% for week in weeks %}
+    {% for day in week %}
+      {% if day == 0 %}
+      <div class="calendar-cell empty"></div>
+      {% else %}
+      <div class="calendar-cell">
+        <div class="day-num">{{ day }}</div>
+        {% for post in grouped.get(day, []) %}
+        <a class="day-post" href="{{ url_for('igtool.post_detail', post_id=post.id) }}" title="{{ post.topic }}">{{ post.topic }}</a>
+        {% endfor %}
+      </div>
+      {% endif %}
+    {% endfor %}
+  {% endfor %}
+</div>
+{% endblock %}

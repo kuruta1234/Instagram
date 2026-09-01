@@ -1,0 +1,32 @@
+{% extends "base.html" %}
+{% block title %}新規作成 - ig-toolkit{% endblock %}
+{% block content %}
+<h1>投稿ドラフトを新規作成</h1>
+<p class="subtitle">トピック・キーワード・画像を入力してください。</p>
+
+<div class="card">
+<form class="stacked" method="post" enctype="multipart/form-data" action="{{ url_for('igtool.post_new') }}">
+  <label for="topic">トピック(必須)</label>
+  <input type="text" id="topic" name="topic" placeholder="例: 秋の新作紅茶" required>
+
+  <label for="keywords">キーワード(カンマ区切り)</label>
+  <input type="text" id="keywords" name="keywords" placeholder="例: 紅茶, 秋限定">
+
+  <label for="tone">トーン</label>
+  <select id="tone" name="tone">
+    {% for t in tones %}
+    <option value="{{ t }}">{{ t }}</option>
+    {% endfor %}
+  </select>
+
+  <label for="images">画像(複数選択可・必須)</label>
+  <input type="file" id="images" name="images" accept="image/*" multiple required>
+  <div class="help-text">投稿に使う画像をここで取り込みます。トリミングや補正は作成後に編集ページで行えます。</div>
+
+  <div class="btn-row">
+    <button type="submit" class="btn btn-primary">作成する</button>
+    <a class="btn" href="{{ url_for('igtool.posts_list') }}">キャンセル</a>
+  </div>
+</form>
+</div>
+{% endblock %}

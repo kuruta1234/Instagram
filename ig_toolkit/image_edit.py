@@ -34,6 +34,31 @@ def resize_and_crop(img: Image.Image, preset: str) -> Image.Image:
     return ImageOps.fit(img, size, method=Image.LANCZOS, centering=(0.5, 0.5))
 
 
+def crop_and_resize(
+    img: Image.Image,
+    x: float,
+    y: float,
+    width: float,
+    height: float,
+    target_size: tuple[int, int] | None = None,
+) -> Image.Image:
+    """任意の矩形(元画像のピクセル座標)で切り抜き、必要なら指定サイズにリサイズする。
+
+    中央固定のresize_and_cropと異なり、切り抜き位置・拡大縮小はGUI側(例: Cropper.js)で
+    ユーザーが自由に指定した値をそのまま使う。
+    """
+    img_w, img_h = img.size
+    x = max(0, min(round(x), img_w - 1))
+    y = max(0, min(round(y), img_h - 1))
+    width = max(1, min(round(width), img_w - x))
+    height = max(1, min(round(height), img_h - y))
+
+    cropped = img.crop((x, y, x + width, y + height))
+    if target_size:
+        cropped = cropped.resize(target_size, Image.LANCZOS)
+    return cropped
+
+
 def auto_enhance(img: Image.Image) -> Image.Image:
     """明るさ・コントラスト・彩度・シャープネスを自動で軽く整える簡易AI補正。"""
     rgb = img.convert("RGB") if img.mode == "RGBA" else img

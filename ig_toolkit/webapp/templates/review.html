@@ -1,0 +1,78 @@
+{% extends "base.html" %}
+{% block title %}投稿前チェック - {{ post.topic }}{% endblock %}
+{% block content %}
+<h1>投稿前チェック</h1>
+<p class="subtitle"><a href="{{ url_for('igtool.post_detail', post_id=post.id) }}">&laquo; {{ post.topic }} に戻る</a></p>
+
+<div class="card">
+  <h3>自動チェック結果</h3>
+  {% if auto_check.ng_word_hits %}
+  <div class="warning-box">NGワード検出: {{ auto_check.ng_word_hits | join(', ') }}</div>
+  {% else %}
+  <div class="ok-box">NGワードは検出されませんでした</div>
+  {% endif %}
+
+  {% if auto_check.image_warnings %}
+    {% for path, warnings in auto_check.image_warnings.items() %}
+      {% for w in warnings %}
+      <div class="warning-box">画像警告({{ path }}): {{ w }}</div>
+      {% endfor %}
+    {% endfor %}
+  {% else %}
+  <div class="ok-box">画像サイズの警告はありません</div>
+  {% endif %}
+
+  {% if auto_check.caption_empty %}
+  <div class="warning-box">キャプションが未入力です</div>
+  {% endif %}
+  {% if auto_check.hashtags_empty %}
+  <div class="warning-box">ハッシュタグが未入力です</div>
+  {% endif %}
+</div>
+
+<div class="card">
+  <h3>チェックリスト</h3>
+  <form method="post" action="{{ url_for('igtool.post_review', post_id=post.id) }}">
+    <div class="checklist-grid">
+      <label class="checklist-item">
+        <input type="checkbox" name="image_ok" {{ 'checked' if post.checklist.image_ok }}>
+        画像の内容・サイズを確認した
+      </label>
+      <label class="checklist-item">
+        <input type="checkbox" name="caption_ok" {{ 'checked' if post.checklist.caption_ok }}>
+        キャプション文面を確認した
+      </label>
+      <label class="checklist-item">
+        <input type="checkbox" name="hashtag_ok" {{ 'checked' if post.checklist.hashtag_ok }}>
+        ハッシュタグを確認した
+      </label>
+      <label class="checklist-item">
+        <input type="checkbox" name="rights_ok" {{ 'checked' if post.checklist.rights_ok }}>
+        画像の著作権・使用許諾に問題ない
+      </label>
+      <label class="checklist-item">
+        <input type="checkbox" name="ng_word_ok" {{ 'checked' if post.checklist.ng_word_ok }}>
+        NGワードチェックを完了した
+      </label>
+    </div>
+    <div class="btn-row">
+      <button type="submit" class="btn btn-primary">チェックリストを保存</button>
+    </div>
+  </form>
+</div>
+
+<div class="card">
+  {% if post.checklist.all_passed() %}
+    {% if post.status.value == 'approved' or post.status.value == 'scheduled' or post.status.value == 'posted' %}
+    <div class="ok-box">この投稿は承認済みです({{ post.status.value }})</div>
+    {% else %}
+    <p>チェックが全て完了しました。この投稿を承認できます。</p>
+    <form method="post" action="{{ url_for('igtool.post_approve', post_id=post.id) }}">
+      <button type="submit" class="btn btn-primary">承認する</button>
+    </form>
+    {% endif %}
+  {% else %}
+  <div class="warning-box">未完了の項目があります。チェックリストを全て完了すると承認できます。</div>
+  {% endif %}
+</div>
+{% endblock %}

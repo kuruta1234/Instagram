@@ -1,0 +1,31 @@
+{% extends "base.html" %}
+{% block title %}投稿一覧 - ig-toolkit{% endblock %}
+{% block content %}
+<h1>投稿一覧</h1>
+<p class="subtitle">下書きの作成から投稿前チェックまでをここで管理します。</p>
+
+<div class="filter-bar">
+  <a href="{{ url_for('igtool.posts_list') }}" class="{{ 'active' if not current_status else '' }}">すべて</a>
+  {% for s in statuses %}
+  <a href="{{ url_for('igtool.posts_list', status=s.value) }}" class="{{ 'active' if current_status == s.value else '' }}">{{ s.value }}</a>
+  {% endfor %}
+</div>
+
+{% if not posts %}
+<div class="card">
+  投稿がまだありません。<a href="{{ url_for('igtool.post_new') }}">新規作成</a>から始めましょう。
+</div>
+{% else %}
+<div class="post-list">
+  {% for post in posts %}
+  <div class="post-row">
+    <div>
+      <div class="topic"><a href="{{ url_for('igtool.post_detail', post_id=post.id) }}">{{ post.topic }}</a></div>
+      <div class="meta">{{ post.id }} ・ 更新: {{ post.updated_at }}{% if post.scheduled_date %} ・ 予定: {{ post.scheduled_date }}{% endif %}</div>
+    </div>
+    <span class="badge badge-{{ post.status.value }}">{{ post.status.value }}</span>
+  </div>
+  {% endfor %}
+</div>
+{% endif %}
+{% endblock %}
