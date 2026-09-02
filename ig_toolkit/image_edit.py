@@ -4,7 +4,9 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from PIL import Image, ImageDraw, ImageEnhance, ImageFilter, ImageFont, ImageOps
+import cv2
+import numpy as np
+from PIL import Image, ImageDraw, ImageEnhance, ImageFont, ImageOps
 
 # Instagram推奨サイズ(長辺1080px基準)
 PRESETS: dict[str, tuple[int, int]] = {
@@ -231,55 +233,74 @@ def _wrap_text(text: str, font, max_width: int, draw: ImageDraw.ImageDraw) -> li
     return lines
 
 
+def _odd(value: float) -> int:
+    """カーネルサイズ用に、1以上の奇数へ丸める。"""
+    n = max(1, int(round(value)))
+    return n if n % 2 == 1 else n + 1
+
+
 def illustrate(
     img: Image.Image,
-    colors: int = 24,
-    edge_strength: int = 55,
-    brightness: float = 1.08,
-    saturation: float = 1.6,
-    line_color: tuple[int, int, int] = (90, 65, 55),
+    levels: int = 6,
+    edge_low: int = 40,
+    edge_high: int = 90,
+    brightness: float = 1.1,
+    saturation: float = 1.5,
+    line_color: tuple[int, int, int] = (70, 60, 65),
 ) -> Image.Image:
-    """写真を明るく鮮やかな配色+やわらかい輪郭線の「かわいいイラスト風」に変換する。
+    """写真を明るく鮮やかな配色+くっきりした輪郭線の「かわいいセル画風イラスト」に変換する。
 
-    OpenCV等の追加インストールなしで動作するよう、Pillow標準機能のみで実装した
-    簡易カートゥーン化(彩度・明るさアップ+減色+輪郭線抽出)。colorsで配色の数
-    (多いほど頬の赤みなど細かい色も残りやすい)、edge_strengthで輪郭線の出やすさ、
-    brightness/saturationで明るさ・鮮やかさ、line_colorで輪郭線の色を調整できる。
-    輪郭線は黒ではなくやわらかい焦げ茶色を既定にし、硬い印象にならないようにしている。
+    OpenCV(bilateralFilter/Canny)を使い、ベタ塗りの色面(セルシェーディング)と
+    はっきりした輪郭線を作る。levelsは色の階調数(少ないほどベタ塗り感が強い)、
+    edge_low/edge_highは輪郭線の出やすさ(Canny法の閾値)、brightness/saturationは
+    明るさ・鮮やかさ、line_colorは輪郭線の色。1080px基準でパラメータを調整しているため、
+    画像サイズに応じてカーネルサイズを自動でスケールする。
     """
-    rgb = img.convert("RGB")
+    rgb = np.array(img.convert("RGB"))
+    height, width = rgb.shape[:2]
+    scale = min(width, height) / 1080
 
     # 1. 明るく鮮やかにして、かわいい印象のベースを作る
-    vivid = ImageEnhance.Color(rgb).enhance(saturation)
-    vivid = ImageEnhance.Brightness(vivid).enhance(brightness)
+    hsv = cv2.cvtColor(rgb, cv2.COLOR_RGB2HSV).astype(np.float32)
+    hsv[..., 1] = np.clip(hsv[..., 1] * saturation, 0, 255)
+    hsv[..., 2] = np.clip(hsv[..., 2] * brightness, 0, 255)
+    vivid = cv2.cvtColor(hsv.astype(np.uint8), cv2.COLOR_HSV2RGB)
 
-    # 2. 細部・ノイズを平滑化してベタ塗りに近づける
-    smooth = vivid
-    for _ in range(5):
-        smooth = smooth.filter(ImageFilter.SMOOTH_MORE)
+    # 2. エッジを保ちつつ平滑化してベタ塗りに近づける(bilateralFilterを複数回)
+    bilateral_d = max(5, _odd(9 * scale))
+    color = vivid
+    for _ in range(4):
+        color = cv2.bilateralFilter(color, d=bilateral_d, sigmaColor=200, sigmaSpace=9)
+    blur_size = max(3, _odd(25 * scale))
+    color = cv2.GaussianBlur(color, (blur_size, blur_size), 0)
 
-    # 3. 減色してポスター風のフラットな配色にする
-    quantized = smooth.quantize(colors=max(4, colors), method=Image.MEDIANCUT).convert("RGB")
+    # 3. 階調ごとに減色してポスター風のフラットな配色にする(色境界のノイズを
+    #    メディアンフィルタで消し、まだら模様にならないようにする)
+    step = 255 / (max(2, levels) - 1)
+    quantized = (np.round(color.astype(np.float32) / step) * step).astype(np.uint8)
+    median_size = max(3, _odd(21 * scale))
+    quantized = cv2.medianBlur(quantized, median_size)
+    quantized = cv2.medianBlur(quantized, median_size)
 
-    # 4. 輪郭線を抽出し、閾値処理して「線画」を作る(画像の外周は誤検出として除外)。
-    #    背景のざらつき(ノイズ)を輪郭と誤検出しないよう、あらかじめしっかりぼかしておく。
-    gray = rgb.convert("L").filter(ImageFilter.GaussianBlur(1.2))
-    gray = gray.filter(ImageFilter.MedianFilter(size=13))
-    edges = gray.filter(ImageFilter.FIND_EDGES)
-    edges = ImageOps.autocontrast(edges, cutoff=1)
-    line_mask = edges.point(lambda p: 255 if p > (255 - edge_strength) else 0)
-    line_mask = line_mask.filter(ImageFilter.MaxFilter(3))
-    ImageDraw.Draw(line_mask).rectangle(
-        [0, 0, line_mask.width - 1, line_mask.height - 1], outline=0, width=2
-    )
-    line_mask = line_mask.filter(ImageFilter.GaussianBlur(0.8))
-    line_mask = line_mask.point(lambda p: 255 if p > 160 else 0)
+    # 4. 輪郭線を抽出する(Canny法。短すぎる断片は誤検出として除外)
+    gray = cv2.cvtColor(rgb, cv2.COLOR_RGB2GRAY)
+    gray_smooth = cv2.bilateralFilter(gray, d=bilateral_d, sigmaColor=200, sigmaSpace=9)
+    gray_blur_size = max(3, _odd(5 * scale))
+    gray_smooth = cv2.GaussianBlur(gray_smooth, (gray_blur_size, gray_blur_size), 0)
+    edges = cv2.Canny(gray_smooth, edge_low, edge_high)
+    edges = cv2.dilate(edges, np.ones((2, 2), np.uint8), iterations=1)
+    contours, _ = cv2.findContours(edges, cv2.RETR_LIST, cv2.CHAIN_APPROX_SIMPLE)
+    line_mask = np.zeros_like(edges)
+    min_length = max(6, 12 * scale)
+    thickness = max(1, _odd(2 * scale) - 1)
+    for contour in contours:
+        if cv2.arcLength(contour, False) > min_length:
+            cv2.drawContours(line_mask, [contour], -1, 255, thickness=thickness)
 
-    # 5. 配色の上にやわらかい色の輪郭線を重ねて完成
+    # 5. 配色の上に輪郭線を重ねて完成
     result = quantized.copy()
-    ink = Image.new("RGB", result.size, line_color)
-    result.paste(ink, mask=line_mask)
-    return result
+    result[line_mask == 255] = line_color
+    return Image.fromarray(result)
 
 
 def validate_instagram_size(img: Image.Image) -> list[str]:
